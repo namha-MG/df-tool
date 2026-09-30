@@ -1,5 +1,5 @@
 """
-LagoFast Event Auto Tool - GUI Application with Tabview
+LagoFast Event Auto Tool - GUI Application with Username/Password Support
 Developed with CustomTkinter & Python 3.11
 """
 import os
@@ -27,13 +27,13 @@ class MainWindow(ctk.CTk):
         super().__init__()
 
         self.title("LagoFast Event Tool - Chia Sẻ & Quay Thưởng")
-        self.geometry("1200x800")
-        self.minsize(1020, 680)
+        self.geometry("1240x820")
+        self.minsize(1050, 700)
 
         self.acc_mgr = AccountManager()
         self.acc_mgr.load_cache()
 
-        # Nếu danh sách rỗng, thêm tài khoản mẫu ban đầu để user tiện thử nghiệm
+        # Nếu danh sách rỗng, thêm tài khoản mẫu ban đầu
         if not self.acc_mgr.accounts:
             self.acc_mgr.add_from_text(
                 "t524082017@gmail.com|20260930202934000000000001750220_dd2bb9ad64f943bf9a04"
@@ -82,7 +82,7 @@ class MainWindow(ctk.CTk):
         self.grid_rowconfigure(1, weight=1)
         self.grid_columnconfigure(0, weight=1)
 
-        # 1. HEADER (Title & Quick Stats)
+        # 1. HEADER (Title & Stats)
         header_frame = ctk.CTkFrame(self, corner_radius=10, fg_color="#161b22")
         header_frame.grid(row=0, column=0, padx=15, pady=(12, 6), sticky="ew")
 
@@ -100,7 +100,7 @@ class MainWindow(ctk.CTk):
 
         lbl_sub = ctk.CTkLabel(
             title_box,
-            text="Tự động chia sẻ sự kiện & quay thưởng may mắn",
+            text="Tự động chia sẻ sự kiện & quay thưởng (Hỗ trợ Username/Password & Token)",
             font=ctk.CTkFont(size=12),
             text_color="#8b949e"
         )
@@ -111,7 +111,7 @@ class MainWindow(ctk.CTk):
         stats_frame.pack(side="right", padx=15, pady=8)
 
         self.card_total = self._create_stat_card(stats_frame, "👥 Tổng tài khoản", "0", "#58a6ff")
-        self.card_shared = self._create_stat_card(stats_frame, "📤 Đã chia sẻ", "0", "#3fb950")
+        self.card_completed = self._create_stat_card(stats_frame, "✅ Đã hoàn tất", "0", "#3fb950")
         self.card_times = self._create_stat_card(stats_frame, "🎯 Tổng lượt quay", "0", "#f0883e")
         self.card_prizes = self._create_stat_card(stats_frame, "🎁 Phần thưởng trúng", "0", "#a371f7")
 
@@ -128,7 +128,7 @@ class MainWindow(ctk.CTk):
         self.tabview.grid(row=1, column=0, padx=15, pady=(0, 12), sticky="nsew")
 
         self.tab_dashboard = self.tabview.add("⚡ Điều Khiển & Danh Sách")
-        self.tab_input = self.tabview.add("📥 Nhập Tài Khoản / Email")
+        self.tab_input = self.tabview.add("📥 Nhập Tài Khoản (Username/Pass/Token)")
 
         self._build_dashboard_tab()
         self._build_input_tab()
@@ -153,7 +153,7 @@ class MainWindow(ctk.CTk):
         tab.grid_rowconfigure(1, weight=1)
         tab.grid_columnconfigure(0, weight=1)
 
-        # 1. CONTROL TOOLBAR
+        # CONTROL TOOLBAR
         ctrl_frame = ctk.CTkFrame(tab, corner_radius=8, fg_color="#161b22")
         ctrl_frame.grid(row=0, column=0, padx=5, pady=(4, 6), sticky="ew")
 
@@ -235,78 +235,102 @@ class MainWindow(ctk.CTk):
             fg_color="#1f6feb",
             hover_color="#388bfd",
             height=34,
-            command=lambda: self.tabview.set("📥 Nhập Tài Khoản / Email")
+            command=lambda: self.tabview.set("📥 Nhập Tài Khoản (Username/Pass/Token)")
         )
         btn_go_import.pack(side="right", padx=4)
 
-        # Bottom row: Settings
+        # Bottom row: Settings & Filters
         settings_row = ctk.CTkFrame(ctrl_frame, fg_color="transparent")
         settings_row.pack(fill="x", padx=10, pady=(2, 8))
 
         lbl_aid = ctk.CTkLabel(settings_row, text="Event AID:", font=ctk.CTkFont(size=11, weight="bold"), text_color="#8b949e")
         lbl_aid.pack(side="left", padx=(0, 4))
 
-        self.entry_aid = ctk.CTkEntry(settings_row, width=260, height=28, font=ctk.CTkFont(size=11))
+        self.entry_aid = ctk.CTkEntry(settings_row, width=240, height=28, font=ctk.CTkFont(size=11))
         self.entry_aid.insert(0, DEFAULT_AID)
-        self.entry_aid.pack(side="left", padx=(0, 15))
+        self.entry_aid.pack(side="left", padx=(0, 10))
 
         lbl_threads = ctk.CTkLabel(settings_row, text="Số luồng:", font=ctk.CTkFont(size=11, weight="bold"), text_color="#8b949e")
         lbl_threads.pack(side="left", padx=(0, 4))
 
-        self.combo_threads = ctk.CTkComboBox(settings_row, values=["1", "2", "3", "5", "8", "10"], width=70, height=28)
-        self.combo_threads.set("3")
-        self.combo_threads.pack(side="left", padx=(0, 15))
+        self.combo_threads = ctk.CTkComboBox(settings_row, values=["1", "2", "3", "5", "8", "10"], width=65, height=28)
+        self.combo_threads.set("1")  # Mặc định 1 luồng nếu dùng trình duyệt đăng nhập
+        self.combo_threads.pack(side="left", padx=(0, 10))
 
-        lbl_delay = ctk.CTkLabel(settings_row, text="Delay (giây):", font=ctk.CTkFont(size=11, weight="bold"), text_color="#8b949e")
+        lbl_delay = ctk.CTkLabel(settings_row, text="Delay (s):", font=ctk.CTkFont(size=11, weight="bold"), text_color="#8b949e")
         lbl_delay.pack(side="left", padx=(0, 4))
 
-        self.entry_delay = ctk.CTkEntry(settings_row, width=50, height=28)
+        self.entry_delay = ctk.CTkEntry(settings_row, width=45, height=28)
         self.entry_delay.insert(0, "1.0")
-        self.entry_delay.pack(side="left", padx=(0, 15))
+        self.entry_delay.pack(side="left", padx=(0, 12))
+
+        # Checkbox: Chỉ chạy 1 lần (Bỏ qua acc đã hoàn tất)
+        self.chk_single_run = ctk.CTkCheckBox(
+            settings_row,
+            text="Chỉ chạy 1 lần (Bỏ qua acc đã xong)",
+            font=ctk.CTkFont(size=11, weight="bold"),
+            text_color="#3fb950",
+            checkbox_height=18,
+            checkbox_width=18
+        )
+        self.chk_single_run.select()
+        self.chk_single_run.pack(side="left", padx=4)
 
         self.chk_spin_all = ctk.CTkCheckBox(
             settings_row,
-            text="Tự động quay hết sạch lượt",
+            text="Quay hết sạch lượt",
             font=ctk.CTkFont(size=11),
             checkbox_height=18,
             checkbox_width=18
         )
         self.chk_spin_all.select()
-        self.chk_spin_all.pack(side="left", padx=5)
+        self.chk_spin_all.pack(side="left", padx=4)
 
         btn_clear = ctk.CTkButton(
             settings_row,
-            text="🗑️ Xóa tất cả",
+            text="🗑️ Xóa hết",
             font=ctk.CTkFont(size=11),
             fg_color="#21262d",
             hover_color="#da3633",
             height=26,
-            width=80,
+            width=70,
             command=self._clear_all_accounts
         )
         btn_clear.pack(side="right", padx=(4, 0))
 
         btn_del_sel = ctk.CTkButton(
             settings_row,
-            text="❌ Xóa đã chọn",
+            text="❌ Xóa chọn",
             font=ctk.CTkFont(size=11),
             fg_color="#21262d",
             hover_color="#b62324",
             height=26,
-            width=90,
+            width=80,
             command=self._delete_selected_accounts
         )
         btn_del_sel.pack(side="right", padx=4)
 
-        # 2. MAIN SPLIT: TABLE & LOGS
+        btn_reset_all = ctk.CTkButton(
+            settings_row,
+            text="🔄 Reset trạng thái",
+            font=ctk.CTkFont(size=11),
+            fg_color="#21262d",
+            hover_color="#388bfd",
+            height=26,
+            width=115,
+            command=self._reset_all_status
+        )
+        btn_reset_all.pack(side="right", padx=4)
+
+        # MAIN SPLIT: TABLE & LOGS
         paned = tk.PanedWindow(tab, orient=tk.VERTICAL, bg="#0d1117", bd=0, sashwidth=6, sashrelief="flat")
         paned.grid(row=1, column=0, padx=5, pady=(2, 6), sticky="nsew")
 
         # Upper: Table
         table_frame = ctk.CTkFrame(paned, corner_radius=8, fg_color="#161b22")
-        paned.add(table_frame, height=330)
+        paned.add(table_frame, height=340)
 
-        columns = ("stt", "email", "credential", "times", "shared", "prizes", "status", "note")
+        columns = ("stt", "email", "password", "credential", "times", "shared", "prizes", "status", "completed", "note")
         self.tree = ttk.Treeview(
             table_frame,
             columns=columns,
@@ -316,21 +340,25 @@ class MainWindow(ctk.CTk):
         )
 
         self.tree.heading("stt", text="#")
-        self.tree.heading("email", text="Email / Tài khoản")
-        self.tree.heading("credential", text="Login Credential")
+        self.tree.heading("email", text="Tài khoản / Email")
+        self.tree.heading("password", text="Mật khẩu")
+        self.tree.heading("credential", text="Token Credential")
         self.tree.heading("times", text="Lượt quay")
         self.tree.heading("shared", text="Chia sẻ")
-        self.tree.heading("prizes", text="Phần thưởng đã trúng")
+        self.tree.heading("prizes", text="Phần thưởng")
         self.tree.heading("status", text="Trạng thái")
+        self.tree.heading("completed", text="Xong?")
         self.tree.heading("note", text="Chi tiết")
 
-        self.tree.column("stt", width=45, anchor="center")
-        self.tree.column("email", width=200, anchor="w")
-        self.tree.column("credential", width=180, anchor="w")
-        self.tree.column("times", width=75, anchor="center")
-        self.tree.column("shared", width=85, anchor="center")
-        self.tree.column("prizes", width=220, anchor="w")
+        self.tree.column("stt", width=40, anchor="center")
+        self.tree.column("email", width=190, anchor="w")
+        self.tree.column("password", width=80, anchor="center")
+        self.tree.column("credential", width=160, anchor="w")
+        self.tree.column("times", width=70, anchor="center")
+        self.tree.column("shared", width=80, anchor="center")
+        self.tree.column("prizes", width=200, anchor="w")
         self.tree.column("status", width=110, anchor="center")
+        self.tree.column("completed", width=65, anchor="center")
         self.tree.column("note", width=180, anchor="w")
 
         vsb = ttk.Scrollbar(table_frame, orient="vertical", command=self.tree.yview)
@@ -346,10 +374,11 @@ class MainWindow(ctk.CTk):
 
         # Context menu
         self.context_menu = tk.Menu(self, tearoff=0, bg="#21262d", fg="#ffffff", activebackground="#1f6feb", activeforeground="#ffffff")
-        self.context_menu.add_command(label="⚡ Chạy tài khoản này (Auto All)", command=self._run_selected_auto)
+        self.context_menu.add_command(label="⚡ Chạy tài khoản này (Bỏ qua giới hạn 1 lần)", command=self._run_selected_force)
         self.context_menu.add_command(label="📤 Chia sẻ sự kiện", command=self._run_selected_share)
         self.context_menu.add_command(label="🎲 Quay thưởng", command=self._run_selected_draw)
         self.context_menu.add_separator()
+        self.context_menu.add_command(label="🔄 Đặt lại trạng thái (Chưa hoàn thành)", command=self._reset_selected_completed)
         self.context_menu.add_command(label="📋 Sao chép Token (Credential)", command=self._copy_selected_credential)
         self.context_menu.add_command(label="❌ Xóa khỏi danh sách", command=self._delete_selected_accounts)
         self.tree.bind("<Button-3>", self._show_context_menu)
@@ -413,7 +442,7 @@ class MainWindow(ctk.CTk):
         self.log("Ứng dụng khởi động thành công. Sẵn sàng xử lý!", "SUCCESS")
 
     # ==========================================
-    # TAB 2: INPUT ACCOUNTS & INSTRUCTIONS
+    # TAB 2: INPUT ACCOUNTS
     # ==========================================
     def _build_input_tab(self):
         tab = self.tab_input
@@ -429,7 +458,7 @@ class MainWindow(ctk.CTk):
 
         lbl_input_title = ctk.CTkLabel(
             left_frame,
-            text="📝 Nhập danh sách tài khoản Email / Token",
+            text="📝 Nhập danh sách tài khoản (Username/Password hoặc Token)",
             font=ctk.CTkFont(size=16, weight="bold"),
             text_color="#58a6ff"
         )
@@ -438,16 +467,15 @@ class MainWindow(ctk.CTk):
         lbl_input_desc = ctk.CTkLabel(
             left_frame,
             text="Hỗ trợ các định dạng (mỗi tài khoản 1 dòng):\n"
-                 "• email|login_credential (Khuyên dùng)\n"
-                 "• email----login_credential\n"
-                 "• Chỉ login_credential (tool sẽ tự truy vấn email qua API)",
+                 "• email|password  hoặc  username|password (Tool tự động đăng nhập trình duyệt)\n"
+                 "• email|password|login_credential (Đầy đủ thông tin)\n"
+                 "• email|login_credential  hoặc  chỉ token login_credential",
             font=ctk.CTkFont(size=11),
             text_color="#8b949e",
             justify="left"
         )
         lbl_input_desc.grid(row=1, column=0, padx=15, pady=(0, 8), sticky="w")
 
-        # Textbox input
         self.txt_input_area = ctk.CTkTextbox(
             left_frame,
             font=ctk.CTkFont(family="Consolas", size=12),
@@ -457,15 +485,15 @@ class MainWindow(ctk.CTk):
         )
         self.txt_input_area.grid(row=2, column=0, padx=15, pady=4, sticky="nsew")
 
-        # Quick sample fill
         sample_text = (
-            "# Nhập danh sách tài khoản của bạn tại đây (mỗi dòng 1 tài khoản):\n"
-            "# email@gmail.com|login_credential\n"
+            "# Nhập danh sách tài khoản (mỗi dòng 1 tài khoản):\n"
+            "# username|password\n"
+            "# user1@gmail.com|MatKhauCuaBan123\n"
+            "# Hoặc email|login_credential:\n"
             "t524082017@gmail.com|20260930202934000000000001750220_dd2bb9ad64f943bf9a04\n"
         )
         self.txt_input_area.insert("1.0", sample_text)
 
-        # Bottom buttons row in Left Frame
         btn_box = ctk.CTkFrame(left_frame, fg_color="transparent")
         btn_box.grid(row=3, column=0, padx=15, pady=(10, 15), sticky="ew")
 
@@ -514,22 +542,21 @@ class MainWindow(ctk.CTk):
         )
         btn_replace.pack(side="right", padx=4)
 
-        # RIGHT COLUMN: GUIDE ON HOW TO GET LOGIN_CREDENTIAL
+        # RIGHT COLUMN: GUIDE ON HOW TO USE
         right_frame = ctk.CTkScrollableFrame(tab, corner_radius=10, fg_color="#161b22")
         right_frame.grid(row=0, column=1, padx=(8, 5), pady=8, sticky="nsew")
 
         lbl_guide_title = ctk.CTkLabel(
             right_frame,
-            text="💡 Hướng dẫn lấy Login-Credential",
+            text="💡 Hướng Dẫn & Cơ Chế Hoạt Động",
             font=ctk.CTkFont(size=16, weight="bold"),
             text_color="#f0883e"
         )
         lbl_guide_title.pack(anchor="w", padx=10, pady=(10, 8))
 
-        # Quick action: Open web
         btn_open_web = ctk.CTkButton(
             right_frame,
-            text="🌐 Mở trang sự kiện LagoFast trên trình duyệt",
+            text="🌐 Mở trang đăng nhập LagoFast trên trình duyệt",
             font=ctk.CTkFont(size=12, weight="bold"),
             fg_color="#1f6feb",
             hover_color="#388bfd",
@@ -538,10 +565,9 @@ class MainWindow(ctk.CTk):
         )
         btn_open_web.pack(fill="x", padx=10, pady=(0, 10))
 
-        # Quick action: Copy 1-line JS script
         btn_copy_js = ctk.CTkButton(
             right_frame,
-            text="📋 Copy mã lấy Token nhanh (1-Click)",
+            text="📋 Copy mã trích xuất Token Console (1-Click)",
             font=ctk.CTkFont(size=12, weight="bold"),
             fg_color="#238636",
             hover_color="#2ea043",
@@ -550,25 +576,22 @@ class MainWindow(ctk.CTk):
         )
         btn_copy_js.pack(fill="x", padx=10, pady=(0, 15))
 
-        # Detailed steps text
         guide_steps = (
-            "📌 CÁCH LẤY TOKEN CỰC NHANH (3 BƯỚC):\n\n"
-            "1️⃣ Bước 1: Bấm nút 'Mở trang sự kiện' ở trên để mở trình duyệt, sau đó đăng nhập tài khoản Google vào LagoFast.\n\n"
-            "2️⃣ Bước 2: Bấm nút 'Copy mã lấy Token nhanh' ở trên.\n\n"
-            "3️⃣ Bước 3: Trên trình duyệt web LagoFast, nhấn phím F12 (hoặc chuột phải chọn Kiểm tra) -> chuyển sang tab Console -> Nhấn Ctrl+V để dán mã vào và gõ Enter.\n\n"
-            "👉 Token sẽ tự động được sao chép vào bộ nhớ tạm! Bạn chỉ việc quay lại tool và dán vào ô bên trái theo cú pháp:\n"
-            "   email@gmail.com|token\n\n"
+            "📌 CƠ CHẾ 'CHỈ CHẠY 1 LẦN CHO MỖI ACC':\n"
+            "• Khi bạn nhấn '⚡ CHẠY TẤT CẢ', tool sẽ tự động chia sẻ sự kiện và quay sạch các lượt còn lại.\n"
+            "• Sau khi thành công, tài khoản sẽ được chuyển sang trạng thái: 'Hoàn tất' (Cột Xong? = 'Có').\n"
+            "• Ở những lần bấm chạy sau, tool sẽ TỰ ĐỘNG BỎ QUA các tài khoản đã hoàn tất này!\n"
+            "• Nếu muốn chạy lại: Bạn chỉ cần bỏ tích chọn 'Chỉ chạy 1 lần' hoặc bấm nút '🔄 Reset trạng thái'.\n\n"
             "-----------------------------------------\n"
-            "📌 CÁCH 2: LẤY TRỰC TIẾP TỪ COOKIE:\n\n"
-            "• Nhấn F12 trên web LagoFast.\n"
-            "• Chọn tab Application (Ứng dụng) ở thanh trên cùng.\n"
-            "• Ở cột bên trái, mở mục Cookies -> chọn https://www.lagofast.com.\n"
-            "• Tìm dòng có tên: Login-Credential.\n"
-            "• Cột Value chính là chuỗi token cần lấy (dạng: 2026..._dd2bb9...).\n\n"
+            "📌 ĐĂNG NHẬP BẰNG USERNAME / PASSWORD:\n"
+            "• Bạn chỉ cần nhập theo định dạng: email|password hoặc username|password.\n"
+            "• Khi chạy, tool sẽ tự động mở cửa sổ trình duyệt Chrome, tự điền tài khoản, mật khẩu và bấm đăng nhập.\n"
+            "• Nếu có hộp thoại kéo mảnh ghép Captcha, bạn chỉ cần trượt mảnh ghép trong 2 giây.\n"
+            "• Tool sẽ tự động bắt Token 'Login-Credential', lưu lại vào bảng và không bao giờ phải đăng nhập lại lần 2!\n\n"
             "-----------------------------------------\n"
-            "📌 LƯU Ý QUAN TRỌNG:\n"
-            "• Token Login-Credential có thời hạn dài, bạn chỉ cần lấy 1 lần cho mỗi tài khoản Gmail.\n"
-            "• Bạn có thể lưu danh sách thành file .txt rồi bấm 'Chọn File' để nạp hàng loạt!"
+            "📌 CÁCH DÙNG TOKEN TRỰC TIẾP:\n"
+            "• Nhập: email|login_credential (Chạy nhanh nhất, không cần mở trình duyệt).\n"
+            "• Lấy token bằng cách bấm nút 'Copy mã trích xuất Token' ở trên rồi dán vào Console (F12) của web LagoFast."
         )
 
         lbl_guide_content = ctk.CTkLabel(
@@ -582,10 +605,9 @@ class MainWindow(ctk.CTk):
         lbl_guide_content.pack(anchor="w", padx=10, pady=5)
 
     def _open_lagofast_web(self):
-        aid = self.entry_aid.get().strip() or DEFAULT_AID
-        url = f"https://www.lagofast.com/vi/act/?aid={aid}&from=sign"
+        url = "https://www.lagofast.com/en/user/signin/"
         webbrowser.open(url)
-        self.log(f"Đã mở trang LagoFast: {url}", "INFO")
+        self.log(f"Đã mở trang đăng nhập LagoFast: {url}", "INFO")
 
     def _copy_extract_js(self):
         self.clipboard_clear()
@@ -640,12 +662,12 @@ class MainWindow(ctk.CTk):
     # ==========================================
     def _update_stats(self):
         total = len(self.acc_mgr.accounts)
-        shared = sum(1 for a in self.acc_mgr.accounts if a.shared == "Đã chia sẻ")
+        completed = sum(1 for a in self.acc_mgr.accounts if a.completed)
         times = sum(a.remain_times for a in self.acc_mgr.accounts)
         prizes = sum(len(a.prizes) for a in self.acc_mgr.accounts)
 
         self.card_total.configure(text=str(total))
-        self.card_shared.configure(text=str(shared))
+        self.card_completed.configure(text=str(completed))
         self.card_times.configure(text=str(times))
         self.card_prizes.configure(text=str(prizes))
 
@@ -661,12 +683,14 @@ class MainWindow(ctk.CTk):
             iid=str(acc.index),
             values=(
                 acc.index,
-                acc.email or "(Chưa lấy email)",
+                acc.email or "(Chưa có tên)",
+                acc.short_password,
                 acc.short_credential,
                 acc.remain_times,
                 acc.shared,
                 acc.display_prizes,
                 acc.status,
+                "Có" if acc.completed else "Chưa",
                 acc.note
             )
         )
@@ -678,12 +702,14 @@ class MainWindow(ctk.CTk):
                 iid,
                 values=(
                     acc.index,
-                    acc.email or "(Chưa lấy email)",
+                    acc.email or "(Chưa có tên)",
+                    acc.short_password,
                     acc.short_credential,
                     acc.remain_times,
                     acc.shared,
                     acc.display_prizes,
                     acc.status,
+                    "Có" if acc.completed else "Chưa",
                     acc.note
                 )
             )
@@ -706,23 +732,24 @@ class MainWindow(ctk.CTk):
     # ==========================================
     # TASK EXECUTION
     # ==========================================
-    def _start_task(self, task_type: str, target_accounts: Optional[List[Account]] = None):
+    def _start_task(self, task_type: str, target_accounts: Optional[List[Account]] = None, force: bool = False):
         accounts = target_accounts if target_accounts is not None else self.acc_mgr.accounts
         if not accounts:
-            messagebox.showwarning("Thông báo", "Danh sách tài khoản đang rỗng! Vui lòng sang tab 'Nhập Tài Khoản / Email' để thêm tài khoản.")
+            messagebox.showwarning("Thông báo", "Danh sách tài khoản đang rỗng! Vui lòng sang tab 'Nhập Tài Khoản' để thêm tài khoản.")
             return
 
         aid = self.entry_aid.get().strip() or DEFAULT_AID
         try:
             threads = int(self.combo_threads.get())
         except Exception:
-            threads = 3
+            threads = 1
         try:
             delay = float(self.entry_delay.get())
         except Exception:
             delay = 1.0
 
         auto_spin_all = bool(self.chk_spin_all.get())
+        only_uncompleted = bool(self.chk_single_run.get()) and not force
 
         self._set_ui_running(True)
         self.progress_bar.set(0)
@@ -733,12 +760,14 @@ class MainWindow(ctk.CTk):
             delay_sec=delay,
             max_threads=threads,
             auto_spin_all=auto_spin_all,
+            only_uncompleted=only_uncompleted,
             on_account_updated=lambda acc: self.after(0, self._on_worker_acc_update, acc),
             on_log=lambda msg, lvl: self.after(0, self.log, msg, lvl),
             on_progress=lambda cur, tot: self.after(0, self._on_worker_progress, cur, tot),
             on_finished=lambda: self.after(0, self._on_worker_finished)
         )
-        self.log(f"Bắt đầu tác vụ [{task_type}] với {len(accounts)} tài khoản (Số luồng: {threads})...", "INFO")
+        mode_text = "(Chỉ chạy acc chưa hoàn tất)" if only_uncompleted else "(Chạy tất cả acc)"
+        self.log(f"Bắt đầu tác vụ [{task_type}] {mode_text} với {len(accounts)} tài khoản...", "INFO")
         self.worker_pool.start_tasks(accounts, task_type)
 
     def _stop_task(self):
@@ -772,25 +801,27 @@ class MainWindow(ctk.CTk):
         self.btn_stop.configure(state="normal" if running else "disabled")
 
     # ==========================================
-    # FILE & ACCOUNT MANAGEMENT
+    # ACCOUNT STATE MANAGEMENT
     # ==========================================
-    def _export_csv(self):
+    def _reset_all_status(self):
         if not self.acc_mgr.accounts:
-            messagebox.showwarning("Thông báo", "Danh sách rỗng, không có dữ liệu để xuất!")
             return
-        path = filedialog.asksaveasfilename(
-            title="Lưu file CSV kết quả",
-            defaultextension=".csv",
-            filetypes=[("CSV files", "*.csv")]
-        )
-        if not path:
-            return
-        try:
-            self.acc_mgr.export_csv(path)
-            self.log(f"Đã xuất dữ liệu ra file: {path}", "SUCCESS")
-            messagebox.showinfo("Thành công", f"Đã xuất danh sách thành công ra:\n{path}")
-        except Exception as e:
-            messagebox.showerror("Lỗi", f"Không thể xuất file: {e}")
+        if messagebox.askyesno("Xác nhận", "Bạn có muốn đặt lại trạng thái (chưa hoàn tất) cho toàn bộ tài khoản?"):
+            self.acc_mgr.reset_status_all()
+            self._populate_table()
+            self._update_stats()
+            self.log("Đã reset trạng thái cho toàn bộ tài khoản về 'Chưa hoàn tất'.", "INFO")
+
+    def _reset_selected_completed(self):
+        accs = self._get_selected_account_objects()
+        for acc in accs:
+            acc.completed = False
+            acc.status = "Chờ"
+            acc.note = ""
+            self._update_table_row(acc)
+        self.acc_mgr.save_cache()
+        self._update_stats()
+        self.log(f"Đã đặt lại trạng thái cho {len(accs)} tài khoản được chọn.", "INFO")
 
     def _clear_all_accounts(self):
         if not self.acc_mgr.accounts:
@@ -812,6 +843,24 @@ class MainWindow(ctk.CTk):
         self._update_stats()
         self.log(f"Đã xóa {len(selected_iids)} tài khoản được chọn.", "INFO")
 
+    def _export_csv(self):
+        if not self.acc_mgr.accounts:
+            messagebox.showwarning("Thông báo", "Danh sách rỗng, không có dữ liệu để xuất!")
+            return
+        path = filedialog.asksaveasfilename(
+            title="Lưu file CSV kết quả",
+            defaultextension=".csv",
+            filetypes=[("CSV files", "*.csv")]
+        )
+        if not path:
+            return
+        try:
+            self.acc_mgr.export_csv(path)
+            self.log(f"Đã xuất dữ liệu ra file: {path}", "SUCCESS")
+            messagebox.showinfo("Thành công", f"Đã xuất danh sách thành công ra:\n{path}")
+        except Exception as e:
+            messagebox.showerror("Lỗi", f"Không thể xuất file: {e}")
+
     # ==========================================
     # CONTEXT MENU
     # ==========================================
@@ -831,10 +880,10 @@ class MainWindow(ctk.CTk):
                 result.append(self.acc_mgr.accounts[idx])
         return result
 
-    def _run_selected_auto(self):
+    def _run_selected_force(self):
         accs = self._get_selected_account_objects()
         if accs:
-            self._start_task(TaskType.AUTO_ALL, target_accounts=accs)
+            self._start_task(TaskType.AUTO_ALL, target_accounts=accs, force=True)
 
     def _run_selected_share(self):
         accs = self._get_selected_account_objects()
@@ -848,10 +897,12 @@ class MainWindow(ctk.CTk):
 
     def _copy_selected_credential(self):
         accs = self._get_selected_account_objects()
-        if accs:
+        if accs and accs[0].credential:
             self.clipboard_clear()
             self.clipboard_append(accs[0].credential)
             self.log(f"Đã sao chép token của {accs[0].email or accs[0].short_credential} vào bộ nhớ tạm.", "INFO")
+        else:
+            messagebox.showinfo("Thông báo", "Tài khoản này chưa có Token Login-Credential.")
 
 
 if __name__ == "__main__":

@@ -1,7 +1,8 @@
 """
 Worker Pool Module
 Handles concurrent execution of API actions across accounts with rate-limiting,
-cancellation support, and thread-safe callbacks to GUI.
+auto-login with Username/Password via LoginService, skip completed accounts,
+and thread-safe callbacks to GUI.
 """
 import time
 import threading
@@ -9,6 +10,7 @@ from queue import Queue
 from typing import List, Callable, Optional, Dict, Any
 from lagofast_api import LagoFastAPI, DEFAULT_AID
 from account_manager import Account
+from login_service import LoginService
 
 class TaskType:
     CHECK_INFO = "check_info"
@@ -23,6 +25,7 @@ class WorkerPool:
         delay_sec: float = 1.0,
         max_threads: int = 3,
         auto_spin_all: bool = True,
+        only_uncompleted: bool = True,
         on_account_updated: Optional[Callable[[Account], None]] = None,
         on_log: Optional[Callable[[str, str], None]] = None,
         on_progress: Optional[Callable[[int, int], None]] = None,
@@ -32,6 +35,7 @@ class WorkerPool:
         self.delay_sec = delay_sec
         self.max_threads = max_threads
         self.auto_spin_all = auto_spin_all
+        self.only_uncompleted = only_uncompleted
         self.on_account_updated = on_account_updated
         self.on_log = on_log
         self.on_progress = on_progress
@@ -62,21 +66,36 @@ class WorkerPool:
 
         self.stop_event.clear()
         self.queue = Queue()
-        self.total_tasks = len(accounts)
+
+        # Lọc danh sách tài khoản nếu bật chế độ chỉ chạy tài khoản chưa hoàn thành
+        target_accounts = []
+        for acc in accounts:
+            if self.only_uncompleted and acc.completed and task_type == TaskType.AUTO_ALL:
+                acc_label = acc.email or acc.short_credential
+                self.log(f"[{acc_label}] Đã hoàn thành trước đó -> Bỏ qua", "INFO")
+                continue
+            target_accounts.append(acc)
+
+        if not target_accounts:
+            self.log("Tất cả tài khoản trong danh sách đã hoàn thành! (Không có tài khoản nào cần chạy)", "SUCCESS")
+            if self.on_finished:
+                self.on_finished()
+            return
+
+        self.total_tasks = len(target_accounts)
         self.completed_tasks = 0
 
-        for acc in accounts:
+        for acc in target_accounts:
             self.queue.put((acc, task_type))
 
         self.active_threads = []
-        num_threads = min(self.max_threads, max(1, len(accounts)))
+        num_threads = min(self.max_threads, max(1, len(target_accounts)))
 
         for i in range(num_threads):
             t = threading.Thread(target=self._worker_loop, name=f"Worker-{i+1}", daemon=True)
             self.active_threads.append(t)
             t.start()
 
-        # Thread giám sát kết thúc
         threading.Thread(target=self._monitor_completion, daemon=True).start()
 
     def _monitor_completion(self):
@@ -84,6 +103,49 @@ class WorkerPool:
             t.join()
         if self.on_finished:
             self.on_finished()
+
+    def _ensure_login(self, acc: Account) -> bool:
+        """
+        Nếu tài khoản chưa có Login-Credential nhưng có mật khẩu,
+        tiến hành đăng nhập để lấy token.
+        """
+        if acc.credential:
+            return True
+
+        if not acc.password:
+            acc.status = "Thiếu Token/MK"
+            acc.note = "Chưa có Login-Credential và không có mật khẩu"
+            self.log(f"[{acc.email}] Thiếu cả Token và Mật khẩu, không thể xử lý!", "ERROR")
+            if self.on_account_updated:
+                self.on_account_updated(acc)
+            return False
+
+        acc.status = "Đang đăng nhập"
+        if self.on_account_updated:
+            self.on_account_updated(acc)
+
+        ok, token, msg = LoginService.login_with_credentials(
+            username=acc.email,
+            password=acc.password,
+            headless=False,
+            timeout=60,
+            on_log=self.log
+        )
+        if ok and token:
+            acc.credential = token
+            acc.status = "Đã đăng nhập"
+            acc.note = "Đăng nhập thành công, đã lưu token"
+            self.log(f"[{acc.email}] Đăng nhập thành công!", "SUCCESS")
+            if self.on_account_updated:
+                self.on_account_updated(acc)
+            return True
+        else:
+            acc.status = "Đăng nhập lỗi"
+            acc.note = msg
+            self.log(f"[{acc.email}] {msg}", "ERROR")
+            if self.on_account_updated:
+                self.on_account_updated(acc)
+            return False
 
     def _worker_loop(self):
         while not self.stop_event.is_set():
@@ -110,8 +172,13 @@ class WorkerPool:
                     time.sleep(self.delay_sec)
 
     def _process_account(self, acc: Account, task_type: str):
-        api = LagoFastAPI(login_credential=acc.credential, aid=self.aid)
         acc_label = acc.email or acc.short_credential
+
+        # Kiểm tra xác thực (đăng nhập nếu cần)
+        if not self._ensure_login(acc):
+            return
+
+        api = LagoFastAPI(login_credential=acc.credential, aid=self.aid)
 
         # 1. CHECK INFO
         if task_type == TaskType.CHECK_INFO:
@@ -119,20 +186,17 @@ class WorkerPool:
             if self.on_account_updated:
                 self.on_account_updated(acc)
 
-            # Lấy thông tin email nếu chưa có
             if not acc.email:
-                ok_m, mem, msg_m = api.get_member_detail()
+                ok_m, mem, _ = api.get_member_detail()
                 if ok_m:
                     acc.email = mem.get("email") or mem.get("member_name") or ""
                     acc_label = acc.email or acc.short_credential
 
-            # Lấy số lượt quay
-            ok_t, times, msg_t = api.get_remain_times()
+            ok_t, times, _ = api.get_remain_times()
             if ok_t:
                 acc.remain_times = times
             
-            # Lấy trạng thái chia sẻ
-            ok_s, state, msg_s = api.get_change_state()
+            ok_s, state, _ = api.get_change_state()
             if ok_s:
                 can_share = state.get("can_share", 1)
                 acc.shared = "Chưa" if can_share == 1 else "Đã chia sẻ"
@@ -152,7 +216,6 @@ class WorkerPool:
             self.log(f"[{acc_label}] Gửi request chia sẻ sự kiện...", "INFO")
             ok_share, msg_share = api.share_activity()
             
-            # Cập nhật số lượt quay mới
             ok_t, times, _ = api.get_remain_times()
             if ok_t:
                 acc.remain_times = times
@@ -176,7 +239,6 @@ class WorkerPool:
             if self.on_account_updated:
                 self.on_account_updated(acc)
 
-            # Cập nhật số lượt quay trước khi quay
             ok_t, times, _ = api.get_remain_times()
             if ok_t:
                 acc.remain_times = times
@@ -212,7 +274,6 @@ class WorkerPool:
 
                 time.sleep(1.0)
 
-            # Đồng bộ lại số lượt thực tế
             ok_t, times, _ = api.get_remain_times()
             if ok_t:
                 acc.remain_times = times
@@ -222,7 +283,7 @@ class WorkerPool:
             if self.on_account_updated:
                 self.on_account_updated(acc)
 
-        # 4. AUTO ALL: Chia sẻ + Quay thưởng
+        # 4. AUTO ALL: Chia sẻ + Quay thưởng (1 lần duy nhất cho mỗi acc)
         elif task_type == TaskType.AUTO_ALL:
             acc.status = "Đang tự động..."
             if self.on_account_updated:
@@ -276,8 +337,10 @@ class WorkerPool:
             if ok_t:
                 acc.remain_times = times
 
+            # Đánh dấu đã hoàn thành thành công
+            acc.completed = True
             acc.status = "Hoàn tất"
             acc.note = f"Chia sẻ OK | Trúng: {acc.display_prizes}"
-            self.log(f"[{acc_label}] Hoàn tất toàn bộ quy trình!", "SUCCESS")
+            self.log(f"[{acc_label}] Hoàn tất toàn bộ quy trình! Đánh dấu hoàn thành.", "SUCCESS")
             if self.on_account_updated:
                 self.on_account_updated(acc)

@@ -1,6 +1,6 @@
 """
 Account Manager Module
-Handles parsing, storage, caching, and export of accounts.
+Handles parsing, storage, caching, and export of accounts with username/password/token support.
 """
 import os
 import json
@@ -9,37 +9,51 @@ from typing import List, Dict, Any, Optional
 
 CACHE_FILE = "accounts_cache.json"
 
+def is_login_credential(s: str) -> bool:
+    s = s.strip()
+    if len(s) >= 40 and "_" in s:
+        parts = s.split("_", 1)
+        if parts[0].isdigit() and len(parts[0]) >= 20:
+            return True
+    return False
+
 class Account:
     def __init__(
         self,
         index: int,
-        credential: str,
+        credential: str = "",
         email: str = "",
+        password: str = "",
         remain_times: int = 0,
         shared: str = "Chưa",
         prizes: Optional[List[str]] = None,
         status: str = "Chờ",
-        note: str = ""
+        note: str = "",
+        completed: bool = False
     ):
         self.index = index
         self.credential = credential.strip()
         self.email = email.strip()
+        self.password = password.strip()
         self.remain_times = remain_times
         self.shared = shared
         self.prizes = prizes or []
         self.status = status
         self.note = note
+        self.completed = completed
 
     def to_dict(self) -> Dict[str, Any]:
         return {
             "index": self.index,
             "credential": self.credential,
             "email": self.email,
+            "password": self.password,
             "remain_times": self.remain_times,
             "shared": self.shared,
             "prizes": self.prizes,
             "status": self.status,
-            "note": self.note
+            "note": self.note,
+            "completed": self.completed
         }
 
     @classmethod
@@ -48,11 +62,13 @@ class Account:
             index=data.get("index", 1),
             credential=data.get("credential", ""),
             email=data.get("email", ""),
+            password=data.get("password", ""),
             remain_times=data.get("remain_times", 0),
             shared=data.get("shared", "Chưa"),
             prizes=data.get("prizes", []),
             status=data.get("status", "Chờ"),
-            note=data.get("note", "")
+            note=data.get("note", ""),
+            completed=data.get("completed", False)
         )
 
     @property
@@ -63,9 +79,17 @@ class Account:
 
     @property
     def short_credential(self) -> str:
+        if not self.credential:
+            return "(Chưa có token)"
         if len(self.credential) > 16:
             return self.credential[:8] + "..." + self.credential[-8:]
         return self.credential
+
+    @property
+    def short_password(self) -> str:
+        if not self.password:
+            return "-"
+        return "••••••"
 
 
 class AccountManager:
@@ -97,16 +121,18 @@ class AccountManager:
 
     def add_from_text(self, text: str) -> int:
         """
-        Thêm tài khoản từ chuỗi văn bản (dán hoặc đọc file).
+        Thêm tài khoản từ chuỗi văn bản.
         Hỗ trợ các định dạng:
-        - email|credential
-        - email:credential
-        - email----credential
-        - credential
+        - username|password
+        - email|password
+        - email|password|login_credential
+        - email|login_credential
+        - username:password
+        - login_credential
         """
         lines = text.strip().splitlines()
         added_count = 0
-        existing_creds = {acc.credential for acc in self.accounts}
+        existing_keys = {acc.email or acc.credential for acc in self.accounts}
 
         for line in lines:
             line = line.strip()
@@ -114,38 +140,57 @@ class AccountManager:
                 continue
 
             email = ""
+            password = ""
             credential = ""
 
+            # Thử các dấu phân cách phổ biến
+            parts = []
             for sep in ["----", "|", ":", ","]:
                 if sep in line:
-                    parts = line.split(sep, 1)
-                    p0 = parts[0].strip()
-                    p1 = parts[1].strip()
-                    if "@" in p0:
-                        email = p0
-                        credential = p1
-                    elif "@" in p1:
-                        email = p1
-                        credential = p0
-                    else:
-                        email = p0
-                        credential = p1
+                    parts = [p.strip() for p in line.split(sep)]
                     break
 
-            if not credential:
-                credential = line
+            if len(parts) >= 3:
+                email = parts[0]
+                password = parts[1]
+                credential = parts[2]
+            elif len(parts) == 2:
+                p0, p1 = parts[0], parts[1]
+                if is_login_credential(p1):
+                    email = p0
+                    credential = p1
+                elif is_login_credential(p0):
+                    email = p1
+                    credential = p0
+                else:
+                    email = p0
+                    password = p1
+            elif len(parts) == 1:
+                p0 = parts[0]
+                if is_login_credential(p0):
+                    credential = p0
+                else:
+                    email = p0
+            else:
+                if is_login_credential(line):
+                    credential = line
+                else:
+                    email = line
 
-            if credential and credential not in existing_creds:
-                existing_creds.add(credential)
+            unique_key = email or credential
+            if unique_key and unique_key not in existing_keys:
+                existing_keys.add(unique_key)
                 new_acc = Account(
                     index=len(self.accounts) + 1,
                     credential=credential,
                     email=email,
+                    password=password,
                     remain_times=0,
                     shared="Chưa",
                     prizes=[],
                     status="Chờ",
-                    note=""
+                    note="",
+                    completed=False
                 )
                 self.accounts.append(new_acc)
                 added_count += 1
@@ -164,26 +209,27 @@ class AccountManager:
         self.reindex()
         self.save_cache()
 
+    def reset_status_all(self) -> None:
+        for acc in self.accounts:
+            acc.completed = False
+            acc.status = "Chờ"
+            acc.note = ""
+        self.save_cache()
+
     def export_csv(self, filepath: str) -> None:
         with open(filepath, "w", newline="", encoding="utf-8-sig") as f:
             writer = csv.writer(f)
-            writer.writerow(["STT", "Email", "Login Credential", "Lượt quay", "Chia sẻ", "Phần thưởng trúng", "Trạng thái", "Ghi chú"])
+            writer.writerow(["STT", "Email / Username", "Mật khẩu", "Login Credential", "Lượt quay", "Chia sẻ", "Phần thưởng trúng", "Trạng thái", "Đã hoàn thành", "Ghi chú"])
             for acc in self.accounts:
                 writer.writerow([
                     acc.index,
                     acc.email,
+                    acc.password,
                     acc.credential,
                     acc.remain_times,
                     acc.shared,
                     acc.display_prizes,
                     acc.status,
+                    "Có" if acc.completed else "Chưa",
                     acc.note
                 ])
-
-    def export_txt_creds(self, filepath: str) -> None:
-        with open(filepath, "w", encoding="utf-8") as f:
-            for acc in self.accounts:
-                if acc.email:
-                    f.write(f"{acc.email}|{acc.credential}\n")
-                else:
-                    f.write(f"{acc.credential}\n")
