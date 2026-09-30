@@ -467,9 +467,9 @@ class MainWindow(ctk.CTk):
         lbl_input_desc = ctk.CTkLabel(
             left_frame,
             text="Hỗ trợ các định dạng (mỗi tài khoản 1 dòng):\n"
-                 "• email|password  hoặc  username|password (Tool tự động đăng nhập trình duyệt)\n"
-                 "• email|password|login_credential (Đầy đủ thông tin)\n"
-                 "• email|login_credential  hoặc  chỉ token login_credential",
+                 "• mail|pass|mail_khoi_phuc (Chuẩn: Tool tự trích đúng Email và Mật khẩu)\n"
+                 "• email|password hoặc username|password\n"
+                 "• email|password|token hoặc email|token",
             font=ctk.CTkFont(size=11),
             text_color="#8b949e",
             justify="left"
@@ -487,8 +487,8 @@ class MainWindow(ctk.CTk):
 
         sample_text = (
             "# Nhập danh sách tài khoản (mỗi dòng 1 tài khoản):\n"
-            "# username|password\n"
-            "# user1@gmail.com|MatKhauCuaBan123\n"
+            "# Định dạng: mail|pass|mail_khoi_phuc\n"
+            "# ví dụ: user1@8edu.org|MatKhau123|recovery@gmail.com\n"
             "# Hoặc email|login_credential:\n"
             "t524082017@gmail.com|20260930202934000000000001750220_dd2bb9ad64f943bf9a04\n"
         )

@@ -1,6 +1,7 @@
 """
 Account Manager Module
 Handles parsing, storage, caching, and export of accounts with username/password/token support.
+Accurately parses formats like: mail|pass|recovery_mail
 """
 import os
 import json
@@ -11,6 +12,8 @@ CACHE_FILE = "accounts_cache.json"
 
 def is_login_credential(s: str) -> bool:
     s = s.strip()
+    if "@" in s:
+        return False
     if len(s) >= 40 and "_" in s:
         parts = s.split("_", 1)
         if parts[0].isdigit() and len(parts[0]) >= 20:
@@ -123,11 +126,11 @@ class AccountManager:
         """
         Thêm tài khoản từ chuỗi văn bản.
         Hỗ trợ các định dạng:
+        - mail|pass|mail_khoi_phuc  (Định dạng chuẩn của người dùng)
+        - mail|pass|mail_khoi_phuc|token
         - username|password
         - email|password
-        - email|password|login_credential
         - email|login_credential
-        - username:password
         - login_credential
         """
         lines = text.strip().splitlines()
@@ -142,6 +145,7 @@ class AccountManager:
             email = ""
             password = ""
             credential = ""
+            note = ""
 
             # Thử các dấu phân cách phổ biến
             parts = []
@@ -151,9 +155,22 @@ class AccountManager:
                     break
 
             if len(parts) >= 3:
+                # Định dạng: mail | pass | mail_khoi_phuc ...
                 email = parts[0]
                 password = parts[1]
-                credential = parts[2]
+
+                # Kiểm tra các phần còn lại xem có token không
+                for extra in parts[2:]:
+                    if is_login_credential(extra):
+                        credential = extra
+                        break
+                
+                # Nếu không phải token và có @, lưu làm ghi chú mail khôi phục
+                if not credential and "@" in parts[2]:
+                    note = f"KP: {parts[2]}"
+                elif not credential and parts[2]:
+                    note = parts[2]
+
             elif len(parts) == 2:
                 p0, p1 = parts[0], parts[1]
                 if is_login_credential(p1):
@@ -189,7 +206,7 @@ class AccountManager:
                     shared="Chưa",
                     prizes=[],
                     status="Chờ",
-                    note="",
+                    note=note,
                     completed=False
                 )
                 self.accounts.append(new_acc)
