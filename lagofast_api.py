@@ -119,9 +119,52 @@ class LagoFastAPI:
             resp = self.session.post(url, headers=self.headers, json={}, timeout=15)
             if resp.status_code == 200:
                 prize = resp.json()
-                prize_name = prize.get("name") or prize.get("title") or "Quà tặng"
-                item_val = prize.get("item", "")
-                full_name = f"{prize_name} ({item_val}h)" if item_val else prize_name
+                prize_name = str(prize.get("name") or prize.get("title") or "Quà tặng").strip()
+                item_val = str(prize.get("item", "")).strip()
+                prize_type = str(prize.get("type", "")).strip()
+
+                # Trích xuất mã quà tặng / CD-Key
+                raw_code = str(
+                    prize.get("code") or 
+                    prize.get("cdkey") or 
+                    prize.get("key") or 
+                    prize.get("card_pwd") or 
+                    item_val or 
+                    ""
+                ).strip()
+
+                # Tẩy bỏ chữ 'h' nếu vô tình bị dính ở cuối (ví dụ format XW20P-2XM7P-NFHV9h)
+                if '-' in raw_code:
+                    parts = raw_code.split('-')
+                    if len(parts) >= 2 and parts[-1].endswith('h') and len(parts[-1]) == len(parts[0]) + 1:
+                        raw_code = raw_code[:-1]
+
+                is_code = False
+                clean_code = ""
+
+                if "-" in raw_code and len(raw_code) >= 8:
+                    is_code = True
+                    clean_code = raw_code.upper()
+                    full_name = f"{prize_name} ({clean_code})"
+                elif prize_type.lower() in ("code", "cdkey", "key"):
+                    is_code = True
+                    clean_code = raw_code.upper()
+                    full_name = f"{prize_name} ({clean_code})"
+                elif len(raw_code) >= 12 and raw_code.isalnum() and not raw_code.isdigit():
+                    is_code = True
+                    clean_code = raw_code.upper()
+                    full_name = f"{prize_name} ({clean_code})"
+                elif item_val.isdigit():
+                    # Số giờ bản quyền LagoFast (ví dụ 24 -> 24h)
+                    full_name = f"{prize_name} ({item_val}h)"
+                elif item_val:
+                    full_name = f"{prize_name} ({item_val})"
+                else:
+                    full_name = prize_name
+
+                prize["clean_code"] = clean_code
+                prize["is_code"] = is_code
+                prize["full_display_name"] = full_name
                 return True, prize, f"Trúng: {full_name}"
             else:
                 try:

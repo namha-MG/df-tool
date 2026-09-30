@@ -14,7 +14,7 @@ import customtkinter as ctk
 
 from lagofast_api import DEFAULT_AID
 from account_manager import AccountManager, Account
-from worker import WorkerPool, TaskType
+from worker import WorkerPool, TaskType, get_app_dir
 
 # Cấu hình giao diện CustomTkinter
 ctk.set_appearance_mode("dark")
@@ -110,10 +110,11 @@ class MainWindow(ctk.CTk):
         stats_frame = ctk.CTkFrame(header_frame, fg_color="transparent")
         stats_frame.pack(side="right", padx=15, pady=8)
 
-        self.card_total = self._create_stat_card(stats_frame, "👥 Tổng tài khoản", "0", "#58a6ff")
-        self.card_completed = self._create_stat_card(stats_frame, "✅ Đã hoàn tất", "0", "#3fb950")
-        self.card_times = self._create_stat_card(stats_frame, "🎯 Tổng lượt quay", "0", "#f0883e")
-        self.card_prizes = self._create_stat_card(stats_frame, "🎁 Phần thưởng trúng", "0", "#a371f7")
+        self.card_total = self._create_stat_card(stats_frame, "👥 Tổng acc", "0", "#58a6ff")
+        self.card_completed = self._create_stat_card(stats_frame, "✅ Đã xong", "0", "#3fb950")
+        self.card_times = self._create_stat_card(stats_frame, "🎯 Lượt quay", "0", "#f0883e")
+        self.card_prizes = self._create_stat_card(stats_frame, "🎁 Phần thưởng", "0", "#a371f7")
+        self.card_codes = self._create_stat_card(stats_frame, "🔑 Mã Code lưu", "0", "#ff7b72")
 
         # 2. MAIN TABVIEW
         self.tabview = ctk.CTkTabview(
@@ -129,13 +130,15 @@ class MainWindow(ctk.CTk):
 
         self.tab_dashboard = self.tabview.add("⚡ Điều Khiển & Danh Sách")
         self.tab_input = self.tabview.add("📥 Nhập Tài Khoản (Username/Pass/Token)")
+        self.tab_codes = self.tabview.add("🎁 Mã Quà Đã Lưu (codes.txt)")
 
         self._build_dashboard_tab()
         self._build_input_tab()
+        self._build_codes_tab()
 
     def _create_stat_card(self, parent, title: str, value: str, color: str):
-        card = ctk.CTkFrame(parent, fg_color="#21262d", corner_radius=8, width=130, height=48)
-        card.pack(side="left", padx=5)
+        card = ctk.CTkFrame(parent, fg_color="#21262d", corner_radius=8, width=116, height=48)
+        card.pack(side="left", padx=4)
         card.pack_propagate(False)
 
         lbl_title = ctk.CTkLabel(card, text=title, font=ctk.CTkFont(size=10), text_color="#8b949e")
@@ -228,6 +231,17 @@ class MainWindow(ctk.CTk):
         )
         self.btn_export.pack(side="right", padx=(4, 0))
 
+        self.btn_open_codes = ctk.CTkButton(
+            act_row,
+            text="🔑 File Mã Quà (codes.txt)",
+            font=ctk.CTkFont(size=12, weight="bold"),
+            fg_color="#d29922",
+            hover_color="#e3b341",
+            height=34,
+            command=self._open_codes_file
+        )
+        self.btn_open_codes.pack(side="right", padx=4)
+
         btn_go_import = ctk.CTkButton(
             act_row,
             text="➕ Thêm Tài Khoản",
@@ -254,7 +268,7 @@ class MainWindow(ctk.CTk):
         lbl_threads.pack(side="left", padx=(0, 4))
 
         self.combo_threads = ctk.CTkComboBox(settings_row, values=["1", "2", "3", "5", "8", "10"], width=65, height=28)
-        self.combo_threads.set("1")  # Mặc định 1 luồng nếu dùng trình duyệt đăng nhập
+        self.combo_threads.set("3")  # Chạy song song 3 luồng mặc định
         self.combo_threads.pack(side="left", padx=(0, 10))
 
         lbl_delay = ctk.CTkLabel(settings_row, text="Delay (s):", font=ctk.CTkFont(size=11, weight="bold"), text_color="#8b949e")
@@ -666,6 +680,269 @@ class MainWindow(ctk.CTk):
             messagebox.showwarning("Thông báo", "Không có tài khoản mới hợp lệ nào được thêm (có thể đã trùng lặp).")
 
     # ==========================================
+    # TAB 3: SAVED CODES (codes.txt & codes_detailed.txt)
+    # ==========================================
+    def _build_codes_tab(self):
+        tab = self.tab_codes
+        tab.grid_rowconfigure(1, weight=1)
+        tab.grid_columnconfigure(0, weight=1)
+
+        # Control Toolbar for Codes
+        bar = ctk.CTkFrame(tab, corner_radius=8, fg_color="#161b22")
+        bar.grid(row=0, column=0, padx=5, pady=(4, 8), sticky="ew")
+
+        left_info = ctk.CTkFrame(bar, fg_color="transparent")
+        left_info.pack(side="left", padx=10, pady=8)
+
+        lbl_head = ctk.CTkLabel(
+            left_info,
+            text="🔑 Quản Lý Mã Quà Tặng / CD-Key (Tự động lưu từ vòng quay)",
+            font=ctk.CTkFont(size=13, weight="bold"),
+            text_color="#58a6ff"
+        )
+        lbl_head.pack(anchor="w")
+
+        lbl_desc = ctk.CTkLabel(
+            left_info,
+            text="Tất cả mã code (Founder's Pack, Game CD-Key...) được tự động trích xuất và lưu vào codes.txt.",
+            font=ctk.CTkFont(size=11),
+            text_color="#8b949e"
+        )
+        lbl_desc.pack(anchor="w")
+
+        # Action buttons
+        btn_box = ctk.CTkFrame(bar, fg_color="transparent")
+        btn_box.pack(side="right", padx=10, pady=8)
+
+        btn_copy = ctk.CTkButton(
+            btn_box,
+            text="📋 Sao Chép Mã",
+            font=ctk.CTkFont(size=12, weight="bold"),
+            fg_color="#238636",
+            hover_color="#2ea043",
+            height=32,
+            command=self._copy_all_codes
+        )
+        btn_copy.pack(side="left", padx=4)
+
+        btn_open_txt = ctk.CTkButton(
+            btn_box,
+            text="📜 Mở codes.txt",
+            font=ctk.CTkFont(size=12, weight="bold"),
+            fg_color="#1f6feb",
+            hover_color="#388bfd",
+            height=32,
+            command=self._open_codes_file
+        )
+        btn_open_txt.pack(side="left", padx=4)
+
+        btn_open_detailed = ctk.CTkButton(
+            btn_box,
+            text="📝 Mở Log Chi Tiết",
+            font=ctk.CTkFont(size=12),
+            fg_color="#30363d",
+            hover_color="#484f58",
+            height=32,
+            command=self._open_detailed_codes_file
+        )
+        btn_open_detailed.pack(side="left", padx=4)
+
+        btn_folder = ctk.CTkButton(
+            btn_box,
+            text="📂 Thư Mục",
+            font=ctk.CTkFont(size=12),
+            fg_color="#21262d",
+            hover_color="#30363d",
+            height=32,
+            command=self._open_app_folder
+        )
+        btn_folder.pack(side="left", padx=4)
+
+        btn_reload = ctk.CTkButton(
+            btn_box,
+            text="🔄 Tải Lại",
+            font=ctk.CTkFont(size=12),
+            fg_color="#21262d",
+            hover_color="#30363d",
+            height=32,
+            width=70,
+            command=self._reload_codes_view
+        )
+        btn_reload.pack(side="left", padx=4)
+
+        btn_clear = ctk.CTkButton(
+            btn_box,
+            text="🗑️ Xóa",
+            font=ctk.CTkFont(size=12),
+            fg_color="#da3633",
+            hover_color="#f85149",
+            height=32,
+            width=60,
+            command=self._clear_saved_codes
+        )
+        btn_clear.pack(side="left", padx=(4, 0))
+
+        # Main Split Content
+        split_frame = ctk.CTkFrame(tab, fg_color="transparent")
+        split_frame.grid(row=1, column=0, padx=5, pady=(0, 5), sticky="nsew")
+        split_frame.grid_rowconfigure(0, weight=1)
+        split_frame.grid_columnconfigure(0, weight=4)  # Left (Codes)
+        split_frame.grid_columnconfigure(1, weight=6)  # Right (Detailed log)
+
+        # Left Column: Raw codes (codes.txt)
+        left_box = ctk.CTkFrame(split_frame, fg_color="#161b22", corner_radius=8)
+        left_box.grid(row=0, column=0, padx=(0, 6), sticky="nsew")
+        left_box.grid_rowconfigure(1, weight=1)
+        left_box.grid_columnconfigure(0, weight=1)
+
+        lbl_left = ctk.CTkLabel(
+            left_box,
+            text="🔑 Mã Code Kích Hoạt (codes.txt - mỗi dòng 1 mã)",
+            font=ctk.CTkFont(size=12, weight="bold"),
+            text_color="#e6edf3"
+        )
+        lbl_left.grid(row=0, column=0, padx=12, pady=(10, 4), sticky="w")
+
+        self.txt_codes_raw = ctk.CTkTextbox(
+            left_box,
+            fg_color="#0d1117",
+            font=ctk.CTkFont(family="Consolas", size=13),
+            text_color="#58a6ff"
+        )
+        self.txt_codes_raw.grid(row=1, column=0, padx=10, pady=(0, 10), sticky="nsew")
+
+        # Right Column: Detailed history (codes_detailed.txt)
+        right_box = ctk.CTkFrame(split_frame, fg_color="#161b22", corner_radius=8)
+        right_box.grid(row=0, column=1, padx=(6, 0), sticky="nsew")
+        right_box.grid_rowconfigure(1, weight=1)
+        right_box.grid_columnconfigure(0, weight=1)
+
+        lbl_right = ctk.CTkLabel(
+            right_box,
+            text="📜 Lịch Sử Chi Tiết (Thời gian | Tài khoản | Quà | Mã code)",
+            font=ctk.CTkFont(size=12, weight="bold"),
+            text_color="#e6edf3"
+        )
+        lbl_right.grid(row=0, column=0, padx=12, pady=(10, 4), sticky="w")
+
+        self.txt_codes_detailed = ctk.CTkTextbox(
+            right_box,
+            fg_color="#0d1117",
+            font=ctk.CTkFont(family="Consolas", size=11),
+            text_color="#e6edf3"
+        )
+        self.txt_codes_detailed.grid(row=1, column=0, padx=10, pady=(0, 10), sticky="nsew")
+
+        self._reload_codes_view()
+
+    def _reload_codes_view(self):
+        app_dir = get_app_dir()
+        codes_file = os.path.join(app_dir, "codes.txt")
+        detailed_file = os.path.join(app_dir, "codes_detailed.txt")
+
+        codes_content = ""
+        codes_count = 0
+        if os.path.exists(codes_file):
+            try:
+                with open(codes_file, "r", encoding="utf-8") as f:
+                    codes_content = f.read()
+                    codes_count = sum(1 for line in codes_content.splitlines() if line.strip())
+            except Exception as e:
+                codes_content = f"Lỗi đọc file: {e}"
+
+        if hasattr(self, 'txt_codes_raw'):
+            self.txt_codes_raw.delete("1.0", "end")
+            self.txt_codes_raw.insert("1.0", codes_content)
+
+        detailed_content = ""
+        if os.path.exists(detailed_file):
+            try:
+                with open(detailed_file, "r", encoding="utf-8") as f:
+                    detailed_content = f.read()
+            except Exception as e:
+                detailed_content = f"Lỗi đọc file: {e}"
+
+        if hasattr(self, 'txt_codes_detailed'):
+            self.txt_codes_detailed.delete("1.0", "end")
+            self.txt_codes_detailed.insert("1.0", detailed_content)
+            self.txt_codes_detailed.see("end")
+
+        if hasattr(self, 'card_codes'):
+            self.card_codes.configure(text=str(codes_count))
+
+    def _open_codes_file(self):
+        codes_file = os.path.join(get_app_dir(), "codes.txt")
+        if not os.path.exists(codes_file):
+            try:
+                with open(codes_file, "w", encoding="utf-8") as f:
+                    pass
+            except Exception:
+                pass
+        try:
+            os.startfile(codes_file)
+        except Exception:
+            try:
+                import subprocess
+                subprocess.Popen(["notepad.exe", codes_file])
+            except Exception as e:
+                messagebox.showerror("Lỗi", f"Không thể mở file: {e}")
+
+    def _open_detailed_codes_file(self):
+        detailed_file = os.path.join(get_app_dir(), "codes_detailed.txt")
+        if not os.path.exists(detailed_file):
+            try:
+                with open(detailed_file, "w", encoding="utf-8") as f:
+                    pass
+            except Exception:
+                pass
+        try:
+            os.startfile(detailed_file)
+        except Exception:
+            try:
+                import subprocess
+                subprocess.Popen(["notepad.exe", detailed_file])
+            except Exception as e:
+                messagebox.showerror("Lỗi", f"Không thể mở file: {e}")
+
+    def _open_app_folder(self):
+        try:
+            os.startfile(get_app_dir())
+        except Exception as e:
+            messagebox.showerror("Lỗi", f"Không thể mở thư mục: {e}")
+
+    def _copy_all_codes(self):
+        if not hasattr(self, 'txt_codes_raw'):
+            return
+        text = self.txt_codes_raw.get("1.0", "end").strip()
+        if not text:
+            messagebox.showinfo("Thông báo", "Chưa có mã code nào được lưu trong codes.txt!")
+            return
+        self.clipboard_clear()
+        self.clipboard_append(text)
+        count = len(text.splitlines())
+        messagebox.showinfo("Đã sao chép", f"Đã sao chép {count} mã code vào clipboard!")
+
+    def _clear_saved_codes(self):
+        if not messagebox.askyesno("Xác nhận", "Bạn có chắc chắn muốn xóa toàn bộ mã code đã lưu trong file codes.txt và codes_detailed.txt?"):
+            return
+        try:
+            app_dir = get_app_dir()
+            for name in ("codes.txt", "codes_detailed.txt"):
+                p = os.path.join(app_dir, name)
+                if os.path.exists(p):
+                    with open(p, "w", encoding="utf-8") as f:
+                        pass
+            self._reload_codes_view()
+            self._update_stats()
+            self.log("Đã xóa sạch nội dung file codes.txt và codes_detailed.txt.", "INFO")
+        except Exception as e:
+            messagebox.showerror("Lỗi", f"Không thể xóa file: {e}")
+
+    def _on_code_saved(self, code: str, email: str, prize: str):
+        self._reload_codes_view()
+        self._update_stats()
+
+    # ==========================================
     # DATA & TABLE LOGIC
     # ==========================================
     def _update_stats(self):
@@ -678,6 +955,19 @@ class MainWindow(ctk.CTk):
         self.card_completed.configure(text=str(completed))
         self.card_times.configure(text=str(times))
         self.card_prizes.configure(text=str(prizes))
+
+        # Đếm số mã quà đã lưu trong codes.txt
+        codes_count = 0
+        try:
+            codes_file = os.path.join(get_app_dir(), "codes.txt")
+            if os.path.exists(codes_file):
+                with open(codes_file, "r", encoding="utf-8") as f:
+                    codes_count = sum(1 for line in f if line.strip())
+        except Exception:
+            pass
+
+        if hasattr(self, 'card_codes'):
+            self.card_codes.configure(text=str(codes_count))
 
     def _populate_table(self):
         self.tree.delete(*self.tree.get_children())
@@ -778,6 +1068,7 @@ class MainWindow(ctk.CTk):
             on_account_updated=lambda acc: self.after(0, self._on_worker_acc_update, acc),
             on_log=lambda msg, lvl: self.after(0, self.log, msg, lvl),
             on_progress=lambda cur, tot: self.after(0, self._on_worker_progress, cur, tot),
+            on_code_saved=lambda code, email, prize: self.after(0, self._on_code_saved, code, email, prize),
             on_finished=lambda: self.after(0, self._on_worker_finished)
         )
         mode_text = "(Chỉ chạy acc chưa hoàn tất)" if only_uncompleted else "(Chạy tất cả acc)"

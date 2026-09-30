@@ -2,15 +2,25 @@
 Worker Pool Module
 Handles concurrent execution of API actions across accounts with rate-limiting,
 auto-login with Username/Password via LoginService, skip completed accounts,
-multi-round Share & Draw looping, and thread-safe callbacks to GUI.
+multi-round Share & Draw looping, automatic Gift Code extraction & file saving,
+and thread-safe callbacks to GUI.
 """
+import os
+import sys
 import time
+import datetime
+import re
 import threading
 from queue import Queue
 from typing import List, Callable, Optional, Dict, Any
 from lagofast_api import LagoFastAPI, DEFAULT_AID
 from account_manager import Account
 from login_service import LoginService
+
+def get_app_dir() -> str:
+    if getattr(sys, 'frozen', False):
+        return os.path.dirname(sys.executable)
+    return os.path.dirname(os.path.abspath(__file__))
 
 class TaskType:
     CHECK_INFO = "check_info"
@@ -30,6 +40,7 @@ class WorkerPool:
         on_account_updated: Optional[Callable[[Account], None]] = None,
         on_log: Optional[Callable[[str, str], None]] = None,
         on_progress: Optional[Callable[[int, int], None]] = None,
+        on_code_saved: Optional[Callable[[str, str, str], None]] = None,
         on_finished: Optional[Callable[[], None]] = None
     ):
         self.aid = aid
@@ -41,6 +52,7 @@ class WorkerPool:
         self.on_account_updated = on_account_updated
         self.on_log = on_log
         self.on_progress = on_progress
+        self.on_code_saved = on_code_saved
         self.on_finished = on_finished
 
         self.queue: Queue = Queue()
@@ -49,6 +61,8 @@ class WorkerPool:
         self.total_tasks = 0
         self.completed_tasks = 0
         self._lock = threading.Lock()
+        self._browser_lock = threading.Lock()
+        self._code_file_lock = threading.Lock()
 
     def log(self, message: str, level: str = "INFO"):
         if self.on_log:
@@ -60,6 +74,35 @@ class WorkerPool:
     def stop(self):
         self.stop_event.set()
         self.log("Đang gửi yêu cầu dừng các luồng...", "WARNING")
+
+    def _save_code_to_file(self, email: str, prize_label: str, code: str):
+        with self._code_file_lock:
+            try:
+                app_dir = get_app_dir()
+                os.makedirs(app_dir, exist_ok=True)
+
+                # 1. File codes.txt chỉ chứa code (mỗi dòng 1 code) để tiện copy kích hoạt hàng loạt
+                codes_file = os.path.join(app_dir, "codes.txt")
+                existing_codes = set()
+                if os.path.exists(codes_file):
+                    with open(codes_file, "r", encoding="utf-8") as f:
+                        existing_codes = {line.strip() for line in f if line.strip()}
+
+                if code not in existing_codes:
+                    with open(codes_file, "a", encoding="utf-8") as f:
+                        f.write(f"{code}\n")
+
+                # 2. File codes_detailed.txt (chi tiết email, quà, thời gian)
+                detailed_file = os.path.join(app_dir, "codes_detailed.txt")
+                now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                with open(detailed_file, "a", encoding="utf-8") as f:
+                    f.write(f"[{now_str}] {email} | {prize_label} | {code}\n")
+
+                self.log(f"[{email}] 🔑 ĐÃ LƯU MÃ CODE VÀO FILE: {code} (Xem codes.txt)", "SUCCESS")
+                if self.on_code_saved:
+                    self.on_code_saved(code, email, prize_label)
+            except Exception as e:
+                self.log(f"Lỗi khi ghi file code: {e}", "ERROR")
 
     def start_tasks(self, accounts: List[Account], task_type: str):
         if self.is_running():
@@ -78,7 +121,7 @@ class WorkerPool:
             target_accounts.append(acc)
 
         if not target_accounts:
-            self.log("Tất cả tài khoản trong danh sách đã hoàn thành! (Không có tài khoản nào cần chạy)", "SUCCESS")
+            self.log("Tất cả tài khoản trong danh sách đã hoàn thành!", "SUCCESS")
             if self.on_finished:
                 self.on_finished()
             return
@@ -90,6 +133,7 @@ class WorkerPool:
             self.queue.put((acc, task_type))
 
         self.active_threads = []
+        # Chạy song song nhiều tài khoản theo max_threads đã cấu hình
         num_threads = min(self.max_threads, max(1, len(target_accounts)))
 
         for i in range(num_threads):
@@ -108,7 +152,8 @@ class WorkerPool:
     def _ensure_login(self, acc: Account) -> bool:
         """
         Nếu tài khoản chưa có Login-Credential nhưng có mật khẩu,
-        tiến hành đăng nhập để lấy token.
+        tiến hành đăng nhập bằng trình duyệt.
+        Dùng lock để không mở quá nhiều trình duyệt cùng 1 giây.
         """
         if acc.credential:
             return True
@@ -121,32 +166,37 @@ class WorkerPool:
                 self.on_account_updated(acc)
             return False
 
-        acc.status = "Đang đăng nhập"
-        if self.on_account_updated:
-            self.on_account_updated(acc)
+        with self._browser_lock:
+            # Double check sau khi lấy lock
+            if acc.credential:
+                return True
 
-        ok, token, msg = LoginService.login_with_credentials(
-            username=acc.email,
-            password=acc.password,
-            headless=False,
-            timeout=60,
-            on_log=self.log
-        )
-        if ok and token:
-            acc.credential = token
-            acc.status = "Đã đăng nhập"
-            acc.note = "Đăng nhập thành công, đã lưu token"
-            self.log(f"[{acc.email}] Đăng nhập thành công!", "SUCCESS")
+            acc.status = "Đang đăng nhập"
             if self.on_account_updated:
                 self.on_account_updated(acc)
-            return True
-        else:
-            acc.status = "Đăng nhập lỗi"
-            acc.note = msg
-            self.log(f"[{acc.email}] {msg}", "ERROR")
-            if self.on_account_updated:
-                self.on_account_updated(acc)
-            return False
+
+            ok, token, msg = LoginService.login_with_credentials(
+                username=acc.email,
+                password=acc.password,
+                headless=False,
+                timeout=60,
+                on_log=self.log
+            )
+            if ok and token:
+                acc.credential = token
+                acc.status = "Đã đăng nhập"
+                acc.note = "Đăng nhập thành công, đã lưu token"
+                self.log(f"[{acc.email}] Đăng nhập thành công!", "SUCCESS")
+                if self.on_account_updated:
+                    self.on_account_updated(acc)
+                return True
+            else:
+                acc.status = "Đăng nhập lỗi"
+                acc.note = msg
+                self.log(f"[{acc.email}] {msg}", "ERROR")
+                if self.on_account_updated:
+                    self.on_account_updated(acc)
+                return False
 
     def _worker_loop(self):
         while not self.stop_event.is_set():
@@ -263,13 +313,25 @@ class WorkerPool:
                 self.log(f"[{acc_label}] Bắt đầu quay lượt {spins}...", "INFO")
                 ok_draw, prize, msg_draw = api.draw_lottery()
                 if ok_draw:
-                    prize_name = prize.get("name") or "Quà tặng"
-                    item = prize.get("item", "")
-                    label = f"{prize_name} ({item}h)" if item else prize_name
+                    label = prize.get("full_display_name") or prize.get("name") or "Quà tặng"
+                    clean_code = prize.get("clean_code")
+                    is_code = prize.get("is_code")
+
                     acc.prizes.append(label)
                     acc.remain_times = max(0, acc.remain_times - 1)
                     acc.status = f"Trúng: {label}"
                     self.log(f"[{acc_label}] 🎉 Chúc mừng trúng: {label}!", "SUCCESS")
+
+                    # Trích xuất code dự phòng nếu clean_code chưa được nhận diện
+                    if not clean_code:
+                        m = re.search(r'([A-Za-z0-9]{4,6}-[A-Za-z0-9]{4,6}-[A-Za-z0-9]{4,6})', label)
+                        if m:
+                            clean_code = m.group(1).upper()
+                            is_code = True
+
+                    # Lưu mã code vào file txt nếu là quà dạng CD-Key / Gift Code
+                    if is_code and clean_code:
+                        self._save_code_to_file(acc.email or acc.short_credential, label, clean_code)
                 else:
                     self.log(f"[{acc_label}] Quay thất bại: {msg_draw}", "WARNING")
                     acc.remain_times = 0
@@ -289,7 +351,7 @@ class WorkerPool:
             if self.on_account_updated:
                 self.on_account_updated(acc)
 
-        # 4. AUTO ALL: Lặp lại [Chia sẻ + Quay] N lần cho mỗi acc
+        # 4. AUTO ALL: Chạy song song từng acc với N vòng lặp [Chia sẻ + Quay]
         elif task_type == TaskType.AUTO_ALL:
             acc.status = "Đang tự động..."
             if self.on_account_updated:
@@ -339,13 +401,25 @@ class WorkerPool:
                     self.log(f"[{acc_label}] [Vòng {round_idx}] Tiến hành quay lượt {round_spins}...", "INFO")
                     ok_draw, prize, msg_draw = api.draw_lottery()
                     if ok_draw:
-                        prize_name = prize.get("name") or "Quà tặng"
-                        item = prize.get("item", "")
-                        label = f"{prize_name} ({item}h)" if item else prize_name
+                        label = prize.get("full_display_name") or prize.get("name") or "Quà tặng"
+                        clean_code = prize.get("clean_code")
+                        is_code = prize.get("is_code")
+
                         acc.prizes.append(label)
                         acc.remain_times = max(0, acc.remain_times - 1)
                         acc.status = f"Trúng: {label}"
                         self.log(f"[{acc_label}] [Vòng {round_idx}] 🎉 Trúng: {label}!", "SUCCESS")
+
+                        # Trích xuất code dự phòng nếu clean_code chưa được nhận diện
+                        if not clean_code:
+                            m = re.search(r'([A-Za-z0-9]{4,6}-[A-Za-z0-9]{4,6}-[A-Za-z0-9]{4,6})', label)
+                            if m:
+                                clean_code = m.group(1).upper()
+                                is_code = True
+
+                        # Lưu mã code vào file txt nếu là quà dạng CD-Key / Gift Code
+                        if is_code and clean_code:
+                            self._save_code_to_file(acc.email or acc.short_credential, label, clean_code)
                     else:
                         self.log(f"[{acc_label}] [Vòng {round_idx}] {msg_draw}", "WARNING")
                         acc.remain_times = 0
