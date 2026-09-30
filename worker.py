@@ -2,7 +2,7 @@
 Worker Pool Module
 Handles concurrent execution of API actions across accounts with rate-limiting,
 auto-login with Username/Password via LoginService, skip completed accounts,
-and thread-safe callbacks to GUI.
+multi-round Share & Draw looping, and thread-safe callbacks to GUI.
 """
 import time
 import threading
@@ -26,6 +26,7 @@ class WorkerPool:
         max_threads: int = 3,
         auto_spin_all: bool = True,
         only_uncompleted: bool = True,
+        loop_count: int = 1,
         on_account_updated: Optional[Callable[[Account], None]] = None,
         on_log: Optional[Callable[[str, str], None]] = None,
         on_progress: Optional[Callable[[int, int], None]] = None,
@@ -36,6 +37,7 @@ class WorkerPool:
         self.max_threads = max_threads
         self.auto_spin_all = auto_spin_all
         self.only_uncompleted = only_uncompleted
+        self.loop_count = max(1, loop_count)
         self.on_account_updated = on_account_updated
         self.on_log = on_log
         self.on_progress = on_progress
@@ -67,7 +69,6 @@ class WorkerPool:
         self.stop_event.clear()
         self.queue = Queue()
 
-        # Lọc danh sách tài khoản nếu bật chế độ chỉ chạy tài khoản chưa hoàn thành
         target_accounts = []
         for acc in accounts:
             if self.only_uncompleted and acc.completed and task_type == TaskType.AUTO_ALL:
@@ -207,29 +208,34 @@ class WorkerPool:
             if self.on_account_updated:
                 self.on_account_updated(acc)
 
-        # 2. SHARE EVENT
+        # 2. SHARE EVENT (Lặp N lần theo cấu hình)
         elif task_type == TaskType.SHARE_EVENT:
             acc.status = "Đang chia sẻ"
             if self.on_account_updated:
                 self.on_account_updated(acc)
 
-            self.log(f"[{acc_label}] Gửi request chia sẻ sự kiện...", "INFO")
-            ok_share, msg_share = api.share_activity()
-            
+            shares = 0
+            for i in range(1, self.loop_count + 1):
+                if self.stop_event.is_set():
+                    break
+                self.log(f"[{acc_label}] Chia sẻ lần {i}/{self.loop_count}...", "INFO")
+                ok_share, msg_share = api.share_activity()
+                if ok_share:
+                    shares += 1
+                    acc.shared = f"Đã chia sẻ ({shares}/{self.loop_count})"
+                    self.log(f"[{acc_label}] Lần {i}/{self.loop_count}: Chia sẻ thành công!", "SUCCESS")
+                else:
+                    self.log(f"[{acc_label}] Lần {i}/{self.loop_count}: {msg_share}", "WARNING")
+
+                if i < self.loop_count and self.delay_sec > 0:
+                    time.sleep(self.delay_sec)
+
             ok_t, times, _ = api.get_remain_times()
             if ok_t:
                 acc.remain_times = times
 
-            if ok_share:
-                acc.shared = "Đã chia sẻ"
-                acc.status = "Chia sẻ OK"
-                acc.note = f"Chia sẻ thành công (+1 lượt, tổng {acc.remain_times})"
-                self.log(f"[{acc_label}] {acc.note}", "SUCCESS")
-            else:
-                acc.status = "Chia sẻ lỗi"
-                acc.note = msg_share
-                self.log(f"[{acc_label}] {msg_share}", "WARNING")
-
+            acc.status = f"Chia sẻ xong ({shares}/{self.loop_count})"
+            acc.note = f"Đã chia sẻ {shares} lần. Tổng lượt quay: {acc.remain_times}"
             if self.on_account_updated:
                 self.on_account_updated(acc)
 
@@ -283,64 +289,87 @@ class WorkerPool:
             if self.on_account_updated:
                 self.on_account_updated(acc)
 
-        # 4. AUTO ALL: Chia sẻ + Quay thưởng (1 lần duy nhất cho mỗi acc)
+        # 4. AUTO ALL: Lặp lại [Chia sẻ + Quay] N lần cho mỗi acc
         elif task_type == TaskType.AUTO_ALL:
             acc.status = "Đang tự động..."
             if self.on_account_updated:
                 self.on_account_updated(acc)
 
-            # Bước 1: Lấy email nếu thiếu
+            # Lấy email nếu thiếu
             if not acc.email:
                 ok_m, mem, _ = api.get_member_detail()
                 if ok_m:
                     acc.email = mem.get("email") or mem.get("member_name") or ""
                     acc_label = acc.email or acc.short_credential
 
-            # Bước 2: Chia sẻ sự kiện nhận lượt quay
-            self.log(f"[{acc_label}] [1/2] Chia sẻ sự kiện...", "INFO")
-            ok_share, msg_share = api.share_activity()
-            if ok_share:
-                acc.shared = "Đã chia sẻ"
-                self.log(f"[{acc_label}] Chia sẻ thành công!", "SUCCESS")
-            else:
-                self.log(f"[{acc_label}] Chia sẻ: {msg_share}", "WARNING")
+            total_spins = 0
+            successful_shares = 0
+            rounds = self.loop_count
 
-            time.sleep(0.8)
+            self.log(f"[{acc_label}] Bắt đầu chu trình lặp {rounds} lần (Chia sẻ + Quay)...", "INFO")
 
-            # Bước 3: Lấy số lượt quay
-            ok_t, times, _ = api.get_remain_times()
-            if ok_t:
-                acc.remain_times = times
-            self.log(f"[{acc_label}] [2/2] Số lượt quay khả dụng: {acc.remain_times}", "INFO")
-
-            # Bước 4: Quay tất cả lượt
-            spins = 0
-            while acc.remain_times > 0 and not self.stop_event.is_set():
-                spins += 1
-                self.log(f"[{acc_label}] Tiến hành quay lượt {spins}...", "INFO")
-                ok_draw, prize, msg_draw = api.draw_lottery()
-                if ok_draw:
-                    prize_name = prize.get("name") or "Quà tặng"
-                    item = prize.get("item", "")
-                    label = f"{prize_name} ({item}h)" if item else prize_name
-                    acc.prizes.append(label)
-                    acc.remain_times = max(0, acc.remain_times - 1)
-                    self.log(f"[{acc_label}] 🎉 Trúng thưởng: {label}!", "SUCCESS")
-                else:
-                    self.log(f"[{acc_label}] {msg_draw}", "WARNING")
-                    acc.remain_times = 0
+            for round_idx in range(1, rounds + 1):
+                if self.stop_event.is_set():
                     break
-                time.sleep(1.0)
 
-            # Cập nhật số lượt cuối
+                self.log(f"[{acc_label}] 🔄 --- [Vòng {round_idx}/{rounds}] ---", "INFO")
+
+                # Bước 1: Chia sẻ sự kiện nhận lượt quay
+                ok_share, msg_share = api.share_activity()
+                if ok_share:
+                    successful_shares += 1
+                    acc.shared = f"Đã chia sẻ ({round_idx}/{rounds})"
+                    self.log(f"[{acc_label}] [Vòng {round_idx}] Chia sẻ sự kiện thành công!", "SUCCESS")
+                else:
+                    self.log(f"[{acc_label}] [Vòng {round_idx}] Chia sẻ: {msg_share}", "WARNING")
+
+                time.sleep(self.delay_sec)
+
+                # Bước 2: Kiểm tra số lượt quay
+                ok_t, times, _ = api.get_remain_times()
+                if ok_t:
+                    acc.remain_times = times
+                self.log(f"[{acc_label}] [Vòng {round_idx}] Số lượt quay khả dụng: {acc.remain_times}", "INFO")
+
+                # Bước 3: Quay thưởng
+                round_spins = 0
+                while acc.remain_times > 0 and not self.stop_event.is_set():
+                    round_spins += 1
+                    total_spins += 1
+                    self.log(f"[{acc_label}] [Vòng {round_idx}] Tiến hành quay lượt {round_spins}...", "INFO")
+                    ok_draw, prize, msg_draw = api.draw_lottery()
+                    if ok_draw:
+                        prize_name = prize.get("name") or "Quà tặng"
+                        item = prize.get("item", "")
+                        label = f"{prize_name} ({item}h)" if item else prize_name
+                        acc.prizes.append(label)
+                        acc.remain_times = max(0, acc.remain_times - 1)
+                        acc.status = f"Trúng: {label}"
+                        self.log(f"[{acc_label}] [Vòng {round_idx}] 🎉 Trúng: {label}!", "SUCCESS")
+                    else:
+                        self.log(f"[{acc_label}] [Vòng {round_idx}] {msg_draw}", "WARNING")
+                        acc.remain_times = 0
+                        break
+
+                    if not self.auto_spin_all:
+                        break
+                    time.sleep(1.0)
+
+                acc.note = f"Vòng {round_idx}/{rounds} | Quà: {acc.display_prizes}"
+                if self.on_account_updated:
+                    self.on_account_updated(acc)
+
+                if round_idx < rounds and self.delay_sec > 0:
+                    time.sleep(self.delay_sec)
+
+            # Cập nhật số lượt cuối cùng
             ok_t, times, _ = api.get_remain_times()
             if ok_t:
                 acc.remain_times = times
 
-            # Đánh dấu đã hoàn thành thành công
             acc.completed = True
-            acc.status = "Hoàn tất"
-            acc.note = f"Chia sẻ OK | Trúng: {acc.display_prizes}"
-            self.log(f"[{acc_label}] Hoàn tất toàn bộ quy trình! Đánh dấu hoàn thành.", "SUCCESS")
+            acc.status = f"Hoàn tất ({rounds} lần)"
+            acc.note = f"Chia sẻ {successful_shares}/{rounds} lần | Quay {total_spins} lần | Quà: {acc.display_prizes}"
+            self.log(f"[{acc_label}] Hoàn tất toàn bộ {rounds} vòng lặp!", "SUCCESS")
             if self.on_account_updated:
                 self.on_account_updated(acc)

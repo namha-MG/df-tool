@@ -262,7 +262,15 @@ class MainWindow(ctk.CTk):
 
         self.entry_delay = ctk.CTkEntry(settings_row, width=45, height=28)
         self.entry_delay.insert(0, "1.0")
-        self.entry_delay.pack(side="left", padx=(0, 12))
+        self.entry_delay.pack(side="left", padx=(0, 10))
+
+        # Số lần lặp lại (Chia sẻ & Quay)
+        lbl_loops = ctk.CTkLabel(settings_row, text="Số lần lặp:", font=ctk.CTkFont(size=11, weight="bold"), text_color="#f0883e")
+        lbl_loops.pack(side="left", padx=(0, 4))
+
+        self.combo_loops = ctk.CTkComboBox(settings_row, values=["1", "2", "3", "5", "10", "20", "50"], width=65, height=28)
+        self.combo_loops.set("1")
+        self.combo_loops.pack(side="left", padx=(0, 10))
 
         # Checkbox: Chỉ chạy 1 lần (Bỏ qua acc đã hoàn tất)
         self.chk_single_run = ctk.CTkCheckBox(
@@ -748,6 +756,11 @@ class MainWindow(ctk.CTk):
         except Exception:
             delay = 1.0
 
+        try:
+            loops = int(self.combo_loops.get())
+        except Exception:
+            loops = 1
+
         auto_spin_all = bool(self.chk_spin_all.get())
         only_uncompleted = bool(self.chk_single_run.get()) and not force
 
@@ -761,13 +774,14 @@ class MainWindow(ctk.CTk):
             max_threads=threads,
             auto_spin_all=auto_spin_all,
             only_uncompleted=only_uncompleted,
+            loop_count=loops,
             on_account_updated=lambda acc: self.after(0, self._on_worker_acc_update, acc),
             on_log=lambda msg, lvl: self.after(0, self.log, msg, lvl),
             on_progress=lambda cur, tot: self.after(0, self._on_worker_progress, cur, tot),
             on_finished=lambda: self.after(0, self._on_worker_finished)
         )
         mode_text = "(Chỉ chạy acc chưa hoàn tất)" if only_uncompleted else "(Chạy tất cả acc)"
-        self.log(f"Bắt đầu tác vụ [{task_type}] {mode_text} với {len(accounts)} tài khoản...", "INFO")
+        self.log(f"Bắt đầu tác vụ [{task_type}] {mode_text} với {len(accounts)} tài khoản (Lặp lại: {loops} lần/acc)...", "INFO")
         self.worker_pool.start_tasks(accounts, task_type)
 
     def _stop_task(self):
