@@ -5,11 +5,51 @@ Captures the Login-Credential session token automatically.
 """
 import time
 from typing import Tuple, Optional, Callable
+
+# Explicit imports for PyInstaller packaging
+import selenium
+import selenium.webdriver
 from selenium import webdriver
 from selenium.webdriver.common.by import By
-from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.chrome.options import Options as ChromeOptions
+from selenium.webdriver.chrome.service import Service as ChromeService
+import selenium.webdriver.chrome.webdriver
+import selenium.webdriver.chromium.webdriver
+
+try:
+    from selenium.webdriver.edge.options import Options as EdgeOptions
+    from selenium.webdriver.edge.service import Service as EdgeService
+    import selenium.webdriver.edge.webdriver
+except Exception:
+    pass
 
 class LoginService:
+    @staticmethod
+    def _create_driver(headless: bool = False):
+        # 1. Thử dùng Chrome
+        try:
+            options = ChromeOptions()
+            if headless:
+                options.add_argument("--headless=new")
+            options.add_argument("--window-size=540,760")
+            options.add_argument("--disable-blink-features=AutomationControlled")
+            options.add_argument("--log-level=3")
+            options.add_experimental_option("excludeSwitches", ["enable-logging", "enable-automation"])
+            return webdriver.Chrome(options=options)
+        except Exception as e_chrome:
+            # 2. Thử fallback sang Microsoft Edge có sẵn trên Windows
+            try:
+                edge_options = EdgeOptions()
+                if headless:
+                    edge_options.add_argument("--headless=new")
+                edge_options.add_argument("--window-size=540,760")
+                edge_options.add_argument("--disable-blink-features=AutomationControlled")
+                edge_options.add_argument("--log-level=3")
+                edge_options.add_experimental_option("excludeSwitches", ["enable-logging", "enable-automation"])
+                return webdriver.Edge(options=edge_options)
+            except Exception:
+                raise e_chrome
+
     @staticmethod
     def login_with_credentials(
         username: str,
@@ -27,17 +67,10 @@ class LoginService:
                 on_log(msg, lvl)
 
         log(f"[{username}] Đang mở trình duyệt để đăng nhập...", "INFO")
-        options = Options()
-        if headless:
-            options.add_argument("--headless=new")
-        options.add_argument("--window-size=540,760")
-        options.add_argument("--disable-blink-features=AutomationControlled")
-        options.add_argument("--log-level=3")
-        options.add_experimental_option("excludeSwitches", ["enable-logging", "enable-automation"])
 
         driver = None
         try:
-            driver = webdriver.Chrome(options=options)
+            driver = LoginService._create_driver(headless=headless)
             driver.get("https://www.lagofast.com/en/user/signin/")
             time.sleep(2.0)
 
@@ -73,14 +106,13 @@ class LoginService:
             except Exception as e:
                 return False, "", f"Không tìm thấy nút đăng nhập: {e}"
 
-            # 5. Chờ cookie Login-Credential xuất hiện (người dùng có thể kéo captcha nếu có)
+            # 5. Chờ cookie Login-Credential xuất hiện
             start_time = time.time()
             notified_captcha = False
 
             while time.time() - start_time < timeout:
                 time.sleep(1.0)
 
-                # Kiểm tra cookie
                 cookies = driver.get_cookies()
                 for c in cookies:
                     if c.get("name") == "Login-Credential" and c.get("value"):

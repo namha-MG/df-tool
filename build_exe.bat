@@ -2,10 +2,10 @@
 title Build LagoFast Event Tool EXE
 cd /d "%~dp0"
 echo ====================================================
-echo   DANG DONG GOI UNG DUNG THANG FILE .EXE
+echo   DANG DONG GOI UNG DUNG THANH FILE .EXE
 echo ====================================================
 echo.
-pyinstaller --noconfirm --onedir --windowed --collect-all customtkinter --name "LagoFast_Event_Tool" main.py
+pyinstaller --noconfirm --onedir --windowed --collect-all customtkinter --collect-all selenium --name "LagoFast_Event_Tool" main.py
 
 if %errorlevel% equ 0 (
     echo.
