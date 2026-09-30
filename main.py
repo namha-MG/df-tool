@@ -716,14 +716,25 @@ class MainWindow(ctk.CTk):
 
         btn_copy = ctk.CTkButton(
             btn_box,
-            text="📋 Sao Chép Mã",
+            text="📋 Copy Kèm Pack",
             font=ctk.CTkFont(size=12, weight="bold"),
             fg_color="#238636",
             hover_color="#2ea043",
             height=32,
             command=self._copy_all_codes
         )
-        btn_copy.pack(side="left", padx=4)
+        btn_copy.pack(side="left", padx=3)
+
+        btn_copy_only = ctk.CTkButton(
+            btn_box,
+            text="📋 Chỉ Copy Mã",
+            font=ctk.CTkFont(size=12),
+            fg_color="#1f6feb",
+            hover_color="#388bfd",
+            height=32,
+            command=self._copy_codes_only
+        )
+        btn_copy_only.pack(side="left", padx=3)
 
         btn_open_txt = ctk.CTkButton(
             btn_box,
@@ -797,7 +808,7 @@ class MainWindow(ctk.CTk):
 
         lbl_left = ctk.CTkLabel(
             left_box,
-            text="🔑 Mã Code Kích Hoạt (codes.txt - mỗi dòng 1 mã)",
+            text="🔑 Mã Code & Gói Quà (codes.txt - Định dạng: Tên Pack | Mã Code)",
             font=ctk.CTkFont(size=12, weight="bold"),
             text_color="#e6edf3"
         )
@@ -920,7 +931,32 @@ class MainWindow(ctk.CTk):
         self.clipboard_clear()
         self.clipboard_append(text)
         count = len(text.splitlines())
-        messagebox.showinfo("Đã sao chép", f"Đã sao chép {count} mã code vào clipboard!")
+        messagebox.showinfo("Đã sao chép", f"Đã sao chép {count} dòng (Mã & Tên Pack) vào clipboard!")
+
+    def _copy_codes_only(self):
+        if not hasattr(self, 'txt_codes_raw'):
+            return
+        text = self.txt_codes_raw.get("1.0", "end").strip()
+        if not text:
+            messagebox.showinfo("Thông báo", "Chưa có mã code nào được lưu trong codes.txt!")
+            return
+        codes = []
+        for line in text.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            if "|" in line:
+                code_part = line.split("|")[-1].strip()
+            elif ":" in line:
+                code_part = line.split(":")[-1].strip()
+            else:
+                code_part = line
+            codes.append(code_part)
+
+        raw_text = "\n".join(codes)
+        self.clipboard_clear()
+        self.clipboard_append(raw_text)
+        messagebox.showinfo("Đã sao chép", f"Đã sao chép {len(codes)} mã code (chỉ lấy mã) vào clipboard!")
 
     def _clear_saved_codes(self):
         if not messagebox.askyesno("Xác nhận", "Bạn có chắc chắn muốn xóa toàn bộ mã code đã lưu trong file codes.txt và codes_detailed.txt?"):

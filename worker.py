@@ -75,32 +75,36 @@ class WorkerPool:
         self.stop_event.set()
         self.log("Đang gửi yêu cầu dừng các luồng...", "WARNING")
 
-    def _save_code_to_file(self, email: str, prize_label: str, code: str):
+    def _save_code_to_file(self, email: str, prize_label: str, code: str, pack_name: str = ""):
         with self._code_file_lock:
             try:
                 app_dir = get_app_dir()
                 os.makedirs(app_dir, exist_ok=True)
 
-                # 1. File codes.txt chỉ chứa code (mỗi dòng 1 code) để tiện copy kích hoạt hàng loạt
+                if not pack_name:
+                    pack_name = prize_label.split("(")[0].strip() if "(" in prize_label else prize_label
+
+                # 1. File codes.txt lưu: Tên_Pack | Mã_Code
                 codes_file = os.path.join(app_dir, "codes.txt")
-                existing_codes = set()
+                existing_content = ""
                 if os.path.exists(codes_file):
                     with open(codes_file, "r", encoding="utf-8") as f:
-                        existing_codes = {line.strip() for line in f if line.strip()}
+                        existing_content = f.read()
 
-                if code not in existing_codes:
+                # Tránh lưu trùng lặp cùng 1 mã code
+                if code not in existing_content:
                     with open(codes_file, "a", encoding="utf-8") as f:
-                        f.write(f"{code}\n")
+                        f.write(f"{pack_name} | {code}\n")
 
-                # 2. File codes_detailed.txt (chi tiết email, quà, thời gian)
+                # 2. File codes_detailed.txt (chi tiết thời gian, email, tên pack, mã code)
                 detailed_file = os.path.join(app_dir, "codes_detailed.txt")
                 now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 with open(detailed_file, "a", encoding="utf-8") as f:
-                    f.write(f"[{now_str}] {email} | {prize_label} | {code}\n")
+                    f.write(f"[{now_str}] {email} | Pack: {pack_name} | Code: {code}\n")
 
-                self.log(f"[{email}] 🔑 ĐÃ LƯU MÃ CODE VÀO FILE: {code} (Xem codes.txt)", "SUCCESS")
+                self.log(f"[{email}] 🔑 ĐÃ LƯU MÃ CODE VÀO FILE ({pack_name}): {code} (Xem codes.txt)", "SUCCESS")
                 if self.on_code_saved:
-                    self.on_code_saved(code, email, prize_label)
+                    self.on_code_saved(code, email, pack_name)
             except Exception as e:
                 self.log(f"Lỗi khi ghi file code: {e}", "ERROR")
 
@@ -322,6 +326,11 @@ class WorkerPool:
                     acc.status = f"Trúng: {label}"
                     self.log(f"[{acc_label}] 🎉 Chúc mừng trúng: {label}!", "SUCCESS")
 
+                    # Trích xuất tên gói quà (bỏ ngoặc nếu có)
+                    pack_name = str(prize.get("name") or prize.get("title") or "Quà tặng").strip()
+                    if "(" in pack_name:
+                        pack_name = pack_name.split("(")[0].strip()
+
                     # Trích xuất code dự phòng nếu clean_code chưa được nhận diện
                     if not clean_code:
                         m = re.search(r'([A-Za-z0-9]{4,6}-[A-Za-z0-9]{4,6}-[A-Za-z0-9]{4,6})', label)
@@ -331,7 +340,7 @@ class WorkerPool:
 
                     # Lưu mã code vào file txt nếu là quà dạng CD-Key / Gift Code
                     if is_code and clean_code:
-                        self._save_code_to_file(acc.email or acc.short_credential, label, clean_code)
+                        self._save_code_to_file(acc.email or acc.short_credential, label, clean_code, pack_name=pack_name)
                 else:
                     self.log(f"[{acc_label}] Quay thất bại: {msg_draw}", "WARNING")
                     acc.remain_times = 0
@@ -410,6 +419,11 @@ class WorkerPool:
                         acc.status = f"Trúng: {label}"
                         self.log(f"[{acc_label}] [Vòng {round_idx}] 🎉 Trúng: {label}!", "SUCCESS")
 
+                        # Trích xuất tên gói quà (bỏ ngoặc nếu có)
+                        pack_name = str(prize.get("name") or prize.get("title") or "Quà tặng").strip()
+                        if "(" in pack_name:
+                            pack_name = pack_name.split("(")[0].strip()
+
                         # Trích xuất code dự phòng nếu clean_code chưa được nhận diện
                         if not clean_code:
                             m = re.search(r'([A-Za-z0-9]{4,6}-[A-Za-z0-9]{4,6}-[A-Za-z0-9]{4,6})', label)
@@ -419,7 +433,7 @@ class WorkerPool:
 
                         # Lưu mã code vào file txt nếu là quà dạng CD-Key / Gift Code
                         if is_code and clean_code:
-                            self._save_code_to_file(acc.email or acc.short_credential, label, clean_code)
+                            self._save_code_to_file(acc.email or acc.short_credential, label, clean_code, pack_name=pack_name)
                     else:
                         self.log(f"[{acc_label}] [Vòng {round_idx}] {msg_draw}", "WARNING")
                         acc.remain_times = 0
