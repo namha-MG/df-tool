@@ -1,11 +1,12 @@
 """
-LagoFast Event Auto Tool - GUI Application
+LagoFast Event Auto Tool - GUI Application with Tabview
 Developed with CustomTkinter & Python 3.11
 """
 import os
 import sys
 import time
 import datetime
+import webbrowser
 from typing import List, Optional
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
@@ -19,77 +20,15 @@ from worker import WorkerPool, TaskType
 ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("blue")
 
-class PasteAccountsDialog(ctk.CTkToplevel):
-    def __init__(self, parent, on_submit):
-        super().__init__(parent)
-        self.title("Nhập danh sách tài khoản")
-        self.geometry("620x450")
-        self.resizable(False, False)
-        self.transient(parent)
-        self.grab_set()
-
-        self.on_submit = on_submit
-
-        lbl_title = ctk.CTkLabel(
-            self,
-            text="Dán danh sách Gmail / Login Credential",
-            font=ctk.CTkFont(size=18, weight="bold")
-        )
-        lbl_title.pack(pady=(15, 5))
-
-        lbl_desc = ctk.CTkLabel(
-            self,
-            text="Hỗ trợ các định dạng (mỗi tài khoản 1 dòng):\n"
-                 "• email|login_credential\n"
-                 "• email----login_credential\n"
-                 "• chỉ login_credential (tool sẽ tự lấy email qua API)",
-            font=ctk.CTkFont(size=12),
-            text_color="#a0a0a0",
-            justify="left"
-        )
-        lbl_desc.pack(padx=20, pady=(0, 10), anchor="w")
-
-        self.textbox = ctk.CTkTextbox(self, width=580, height=230, font=ctk.CTkFont(family="Consolas", size=12))
-        self.textbox.pack(padx=20, pady=5)
-        self.textbox.focus_set()
-
-        # Nút hành động
-        btn_frame = ctk.CTkFrame(self, fg_color="transparent")
-        btn_frame.pack(padx=20, pady=(15, 10), fill="x")
-
-        btn_cancel = ctk.CTkButton(
-            btn_frame,
-            text="Hủy",
-            width=100,
-            fg_color="#404040",
-            hover_color="#505050",
-            command=self.destroy
-        )
-        btn_cancel.pack(side="right", padx=(10, 0))
-
-        btn_add = ctk.CTkButton(
-            btn_frame,
-            text="Thêm vào danh sách",
-            width=160,
-            fg_color="#2ea043",
-            hover_color="#3fb950",
-            command=self._handle_add
-        )
-        btn_add.pack(side="right")
-
-    def _handle_add(self):
-        text = self.textbox.get("1.0", "end")
-        if self.on_submit(text):
-            self.destroy()
-
+COOKIE_EXTRACT_JS = """copy(document.cookie.match(/Login-Credential=([^;]+)/)?.[1] || (alert("Chưa đăng nhập hoặc không tìm thấy cookie Login-Credential!"), "")); alert("✅ Đã sao chép Login-Credential vào clipboard!");"""
 
 class MainWindow(ctk.CTk):
     def __init__(self):
         super().__init__()
 
         self.title("LagoFast Event Tool - Chia Sẻ & Quay Thưởng")
-        self.geometry("1180x760")
-        self.minsize(980, 650)
+        self.geometry("1200x800")
+        self.minsize(1020, 680)
 
         self.acc_mgr = AccountManager()
         self.acc_mgr.load_cache()
@@ -100,7 +39,7 @@ class MainWindow(ctk.CTk):
                 "t524082017@gmail.com|20260930202934000000000001750220_dd2bb9ad64f943bf9a04"
             )
 
-        self.worker_pool: WorkerPool = None
+        self.worker_pool: Optional[WorkerPool] = None
 
         self._init_styles()
         self._build_ui()
@@ -114,16 +53,16 @@ class MainWindow(ctk.CTk):
         # Cấu hình Treeview dark theme
         self.style.configure(
             "Custom.Treeview",
-            background="#1e1e1e",
+            background="#161b22",
             foreground="#e6edf3",
-            fieldbackground="#1e1e1e",
+            fieldbackground="#161b22",
             borderwidth=0,
-            rowheight=30,
+            rowheight=32,
             font=("Segoe UI", 10)
         )
         self.style.configure(
             "Custom.Treeview.Heading",
-            background="#2d333b",
+            background="#21262d",
             foreground="#58a6ff",
             relief="flat",
             borderwidth=1,
@@ -136,20 +75,20 @@ class MainWindow(ctk.CTk):
         )
         self.style.map(
             "Custom.Treeview.Heading",
-            background=[("active", "#38404a")]
+            background=[("active", "#30363d")]
         )
 
     def _build_ui(self):
-        self.grid_rowconfigure(2, weight=1)
+        self.grid_rowconfigure(1, weight=1)
         self.grid_columnconfigure(0, weight=1)
 
-        # 1. HEADER & STATS
+        # 1. HEADER (Title & Quick Stats)
         header_frame = ctk.CTkFrame(self, corner_radius=10, fg_color="#161b22")
-        header_frame.grid(row=0, column=0, padx=15, pady=(15, 8), sticky="ew")
+        header_frame.grid(row=0, column=0, padx=15, pady=(12, 6), sticky="ew")
 
         # Title
         title_box = ctk.CTkFrame(header_frame, fg_color="transparent")
-        title_box.pack(side="left", padx=15, pady=10)
+        title_box.pack(side="left", padx=15, pady=8)
         
         lbl_app = ctk.CTkLabel(
             title_box,
@@ -169,20 +108,58 @@ class MainWindow(ctk.CTk):
 
         # Stats Cards
         stats_frame = ctk.CTkFrame(header_frame, fg_color="transparent")
-        stats_frame.pack(side="right", padx=15, pady=10)
+        stats_frame.pack(side="right", padx=15, pady=8)
 
         self.card_total = self._create_stat_card(stats_frame, "👥 Tổng tài khoản", "0", "#58a6ff")
         self.card_shared = self._create_stat_card(stats_frame, "📤 Đã chia sẻ", "0", "#3fb950")
         self.card_times = self._create_stat_card(stats_frame, "🎯 Tổng lượt quay", "0", "#f0883e")
         self.card_prizes = self._create_stat_card(stats_frame, "🎁 Phần thưởng trúng", "0", "#a371f7")
 
-        # 2. CONTROL TOOLBAR & SETTINGS
-        ctrl_frame = ctk.CTkFrame(self, corner_radius=10, fg_color="#21262d")
-        ctrl_frame.grid(row=1, column=0, padx=15, pady=6, sticky="ew")
+        # 2. MAIN TABVIEW
+        self.tabview = ctk.CTkTabview(
+            self,
+            corner_radius=10,
+            fg_color="#0d1117",
+            segmented_button_fg_color="#161b22",
+            segmented_button_selected_color="#1f6feb",
+            segmented_button_selected_hover_color="#388bfd",
+            segmented_button_unselected_hover_color="#21262d"
+        )
+        self.tabview.grid(row=1, column=0, padx=15, pady=(0, 12), sticky="nsew")
 
-        # Top row of toolbar: Action Buttons
+        self.tab_dashboard = self.tabview.add("⚡ Điều Khiển & Danh Sách")
+        self.tab_input = self.tabview.add("📥 Nhập Tài Khoản / Email")
+
+        self._build_dashboard_tab()
+        self._build_input_tab()
+
+    def _create_stat_card(self, parent, title: str, value: str, color: str):
+        card = ctk.CTkFrame(parent, fg_color="#21262d", corner_radius=8, width=130, height=48)
+        card.pack(side="left", padx=5)
+        card.pack_propagate(False)
+
+        lbl_title = ctk.CTkLabel(card, text=title, font=ctk.CTkFont(size=10), text_color="#8b949e")
+        lbl_title.pack(anchor="w", padx=8, pady=(4, 0))
+
+        lbl_val = ctk.CTkLabel(card, text=value, font=ctk.CTkFont(size=15, weight="bold"), text_color=color)
+        lbl_val.pack(anchor="w", padx=8, pady=(0, 4))
+        return lbl_val
+
+    # ==========================================
+    # TAB 1: DASHBOARD & CONTROL
+    # ==========================================
+    def _build_dashboard_tab(self):
+        tab = self.tab_dashboard
+        tab.grid_rowconfigure(1, weight=1)
+        tab.grid_columnconfigure(0, weight=1)
+
+        # 1. CONTROL TOOLBAR
+        ctrl_frame = ctk.CTkFrame(tab, corner_radius=8, fg_color="#161b22")
+        ctrl_frame.grid(row=0, column=0, padx=5, pady=(4, 6), sticky="ew")
+
+        # Top row: Action buttons
         act_row = ctk.CTkFrame(ctrl_frame, fg_color="transparent")
-        act_row.pack(fill="x", padx=12, pady=(10, 6))
+        act_row.pack(fill="x", padx=10, pady=(8, 4))
 
         self.btn_auto_all = ctk.CTkButton(
             act_row,
@@ -193,7 +170,7 @@ class MainWindow(ctk.CTk):
             height=34,
             command=lambda: self._start_task(TaskType.AUTO_ALL)
         )
-        self.btn_auto_all.pack(side="left", padx=(0, 8))
+        self.btn_auto_all.pack(side="left", padx=(0, 6))
 
         self.btn_share = ctk.CTkButton(
             act_row,
@@ -221,8 +198,8 @@ class MainWindow(ctk.CTk):
             act_row,
             text="🔍 Kiểm Tra Info",
             font=ctk.CTkFont(size=12),
-            fg_color="#30363d",
-            hover_color="#484f58",
+            fg_color="#21262d",
+            hover_color="#30363d",
             height=34,
             command=lambda: self._start_task(TaskType.CHECK_INFO)
         )
@@ -240,43 +217,31 @@ class MainWindow(ctk.CTk):
         )
         self.btn_stop.pack(side="left", padx=4)
 
-        # Right side: Manage accounts
-        self.btn_paste = ctk.CTkButton(
-            act_row,
-            text="➕ Dán danh sách",
-            font=ctk.CTkFont(size=12),
-            fg_color="#30363d",
-            hover_color="#484f58",
-            height=34,
-            command=self._open_paste_dialog
-        )
-        self.btn_paste.pack(side="right", padx=(4, 0))
-
-        self.btn_import = ctk.CTkButton(
-            act_row,
-            text="📂 Nhập File",
-            font=ctk.CTkFont(size=12),
-            fg_color="#30363d",
-            hover_color="#484f58",
-            height=34,
-            command=self._import_file
-        )
-        self.btn_import.pack(side="right", padx=4)
-
         self.btn_export = ctk.CTkButton(
             act_row,
             text="💾 Xuất CSV",
             font=ctk.CTkFont(size=12),
-            fg_color="#30363d",
-            hover_color="#484f58",
+            fg_color="#21262d",
+            hover_color="#30363d",
             height=34,
             command=self._export_csv
         )
-        self.btn_export.pack(side="right", padx=4)
+        self.btn_export.pack(side="right", padx=(4, 0))
 
-        # Bottom row of toolbar: Settings
+        btn_go_import = ctk.CTkButton(
+            act_row,
+            text="➕ Thêm Tài Khoản",
+            font=ctk.CTkFont(size=12),
+            fg_color="#1f6feb",
+            hover_color="#388bfd",
+            height=34,
+            command=lambda: self.tabview.set("📥 Nhập Tài Khoản / Email")
+        )
+        btn_go_import.pack(side="right", padx=4)
+
+        # Bottom row: Settings
         settings_row = ctk.CTkFrame(ctrl_frame, fg_color="transparent")
-        settings_row.pack(fill="x", padx=12, pady=(2, 8))
+        settings_row.pack(fill="x", padx=10, pady=(2, 8))
 
         lbl_aid = ctk.CTkLabel(settings_row, text="Event AID:", font=ctk.CTkFont(size=11, weight="bold"), text_color="#8b949e")
         lbl_aid.pack(side="left", padx=(0, 4))
@@ -333,15 +298,14 @@ class MainWindow(ctk.CTk):
         )
         btn_del_sel.pack(side="right", padx=4)
 
-        # 3. MAIN CONTENT: TABLE & LOGS (PanedWindow)
-        paned = tk.PanedWindow(self, orient=tk.VERTICAL, bg="#0d1117", bd=0, sashwidth=6, sashrelief="flat")
-        paned.grid(row=2, column=0, padx=15, pady=(4, 15), sticky="nsew")
+        # 2. MAIN SPLIT: TABLE & LOGS
+        paned = tk.PanedWindow(tab, orient=tk.VERTICAL, bg="#0d1117", bd=0, sashwidth=6, sashrelief="flat")
+        paned.grid(row=1, column=0, padx=5, pady=(2, 6), sticky="nsew")
 
-        # Upper: Accounts Table Frame
-        table_frame = ctk.CTkFrame(paned, corner_radius=10, fg_color="#161b22")
-        paned.add(table_frame, height=380)
+        # Upper: Table
+        table_frame = ctk.CTkFrame(paned, corner_radius=8, fg_color="#161b22")
+        paned.add(table_frame, height=330)
 
-        # Treeview Table
         columns = ("stt", "email", "credential", "times", "shared", "prizes", "status", "note")
         self.tree = ttk.Treeview(
             table_frame,
@@ -369,19 +333,18 @@ class MainWindow(ctk.CTk):
         self.tree.column("status", width=110, anchor="center")
         self.tree.column("note", width=180, anchor="w")
 
-        # Scrollbars
         vsb = ttk.Scrollbar(table_frame, orient="vertical", command=self.tree.yview)
         hsb = ttk.Scrollbar(table_frame, orient="horizontal", command=self.tree.xview)
         self.tree.configure(yscrollcommand=vsb.set, xscrollcommand=hsb.set)
 
-        self.tree.grid(row=0, column=0, sticky="nsew", padx=(8, 0), pady=(8, 0))
-        vsb.grid(row=0, column=1, sticky="ns", pady=(8, 0), padx=(0, 8))
-        hsb.grid(row=1, column=0, sticky="ew", padx=(8, 0), pady=(0, 8))
+        self.tree.grid(row=0, column=0, sticky="nsew", padx=(6, 0), pady=(6, 0))
+        vsb.grid(row=0, column=1, sticky="ns", pady=(6, 0), padx=(0, 6))
+        hsb.grid(row=1, column=0, sticky="ew", padx=(6, 0), pady=(0, 6))
 
         table_frame.grid_rowconfigure(0, weight=1)
         table_frame.grid_columnconfigure(0, weight=1)
 
-        # Right-click context menu
+        # Context menu
         self.context_menu = tk.Menu(self, tearoff=0, bg="#21262d", fg="#ffffff", activebackground="#1f6feb", activeforeground="#ffffff")
         self.context_menu.add_command(label="⚡ Chạy tài khoản này (Auto All)", command=self._run_selected_auto)
         self.context_menu.add_command(label="📤 Chia sẻ sự kiện", command=self._run_selected_share)
@@ -391,13 +354,12 @@ class MainWindow(ctk.CTk):
         self.context_menu.add_command(label="❌ Xóa khỏi danh sách", command=self._delete_selected_accounts)
         self.tree.bind("<Button-3>", self._show_context_menu)
 
-        # Lower: Bottom Panel (Progress & Logs)
-        bottom_frame = ctk.CTkFrame(paned, corner_radius=10, fg_color="#161b22")
-        paned.add(bottom_frame, height=220)
+        # Lower: Logs & Progress
+        bottom_frame = ctk.CTkFrame(paned, corner_radius=8, fg_color="#161b22")
+        paned.add(bottom_frame, height=210)
 
-        # Progress bar bar
         prog_row = ctk.CTkFrame(bottom_frame, fg_color="transparent")
-        prog_row.pack(fill="x", padx=12, pady=(8, 4))
+        prog_row.pack(fill="x", padx=10, pady=(6, 4))
 
         self.lbl_progress = ctk.CTkLabel(
             prog_row,
@@ -411,9 +373,8 @@ class MainWindow(ctk.CTk):
         self.progress_bar.set(0)
         self.progress_bar.pack(side="right", fill="x", expand=True, padx=(15, 0))
 
-        # Logs Box Header
         log_header = ctk.CTkFrame(bottom_frame, fg_color="transparent")
-        log_header.pack(fill="x", padx=12, pady=(2, 2))
+        log_header.pack(fill="x", padx=10, pady=(2, 2))
 
         lbl_log_title = ctk.CTkLabel(
             log_header,
@@ -435,16 +396,14 @@ class MainWindow(ctk.CTk):
         )
         btn_clear_log.pack(side="right")
 
-        # Logs Textbox
         self.txt_logs = ctk.CTkTextbox(
             bottom_frame,
             font=ctk.CTkFont(family="Consolas", size=11),
             fg_color="#0d1117",
             text_color="#c9d1d9"
         )
-        self.txt_logs.pack(fill="both", expand=True, padx=12, pady=(0, 10))
+        self.txt_logs.pack(fill="both", expand=True, padx=10, pady=(0, 8))
 
-        # Tag colors for logs
         self.txt_logs.tag_config("INFO", foreground="#58a6ff")
         self.txt_logs.tag_config("SUCCESS", foreground="#3fb950")
         self.txt_logs.tag_config("WARNING", foreground="#d29922")
@@ -453,18 +412,232 @@ class MainWindow(ctk.CTk):
 
         self.log("Ứng dụng khởi động thành công. Sẵn sàng xử lý!", "SUCCESS")
 
-    def _create_stat_card(self, parent, title: str, value: str, color: str):
-        card = ctk.CTkFrame(parent, fg_color="#21262d", corner_radius=8, width=130, height=48)
-        card.pack(side="left", padx=5)
-        card.pack_propagate(False)
+    # ==========================================
+    # TAB 2: INPUT ACCOUNTS & INSTRUCTIONS
+    # ==========================================
+    def _build_input_tab(self):
+        tab = self.tab_input
+        tab.grid_columnconfigure(0, weight=3)
+        tab.grid_columnconfigure(1, weight=2)
+        tab.grid_rowconfigure(0, weight=1)
 
-        lbl_title = ctk.CTkLabel(card, text=title, font=ctk.CTkFont(size=10), text_color="#8b949e")
-        lbl_title.pack(anchor="w", padx=8, pady=(4, 0))
+        # LEFT COLUMN: INPUT BOX & ACTIONS
+        left_frame = ctk.CTkFrame(tab, corner_radius=10, fg_color="#161b22")
+        left_frame.grid(row=0, column=0, padx=(5, 8), pady=8, sticky="nsew")
+        left_frame.grid_rowconfigure(2, weight=1)
+        left_frame.grid_columnconfigure(0, weight=1)
 
-        lbl_val = ctk.CTkLabel(card, text=value, font=ctk.CTkFont(size=15, weight="bold"), text_color=color)
-        lbl_val.pack(anchor="w", padx=8, pady=(0, 4))
-        return lbl_val
+        lbl_input_title = ctk.CTkLabel(
+            left_frame,
+            text="📝 Nhập danh sách tài khoản Email / Token",
+            font=ctk.CTkFont(size=16, weight="bold"),
+            text_color="#58a6ff"
+        )
+        lbl_input_title.grid(row=0, column=0, padx=15, pady=(15, 4), sticky="w")
 
+        lbl_input_desc = ctk.CTkLabel(
+            left_frame,
+            text="Hỗ trợ các định dạng (mỗi tài khoản 1 dòng):\n"
+                 "• email|login_credential (Khuyên dùng)\n"
+                 "• email----login_credential\n"
+                 "• Chỉ login_credential (tool sẽ tự truy vấn email qua API)",
+            font=ctk.CTkFont(size=11),
+            text_color="#8b949e",
+            justify="left"
+        )
+        lbl_input_desc.grid(row=1, column=0, padx=15, pady=(0, 8), sticky="w")
+
+        # Textbox input
+        self.txt_input_area = ctk.CTkTextbox(
+            left_frame,
+            font=ctk.CTkFont(family="Consolas", size=12),
+            fg_color="#0d1117",
+            text_color="#c9d1d9",
+            wrap="none"
+        )
+        self.txt_input_area.grid(row=2, column=0, padx=15, pady=4, sticky="nsew")
+
+        # Quick sample fill
+        sample_text = (
+            "# Nhập danh sách tài khoản của bạn tại đây (mỗi dòng 1 tài khoản):\n"
+            "# email@gmail.com|login_credential\n"
+            "t524082017@gmail.com|20260930202934000000000001750220_dd2bb9ad64f943bf9a04\n"
+        )
+        self.txt_input_area.insert("1.0", sample_text)
+
+        # Bottom buttons row in Left Frame
+        btn_box = ctk.CTkFrame(left_frame, fg_color="transparent")
+        btn_box.grid(row=3, column=0, padx=15, pady=(10, 15), sticky="ew")
+
+        btn_load_file = ctk.CTkButton(
+            btn_box,
+            text="📂 Chọn File .TXT / .CSV",
+            font=ctk.CTkFont(size=12, weight="bold"),
+            fg_color="#30363d",
+            hover_color="#484f58",
+            height=34,
+            command=self._load_file_into_input
+        )
+        btn_load_file.pack(side="left", padx=(0, 6))
+
+        btn_clear_input = ctk.CTkButton(
+            btn_box,
+            text="🧹 Xóa ô nhập",
+            font=ctk.CTkFont(size=12),
+            fg_color="#21262d",
+            hover_color="#30363d",
+            height=34,
+            width=90,
+            command=lambda: self.txt_input_area.delete("1.0", "end")
+        )
+        btn_clear_input.pack(side="left", padx=4)
+
+        btn_append = ctk.CTkButton(
+            btn_box,
+            text="➕ Thêm vào danh sách",
+            font=ctk.CTkFont(size=12, weight="bold"),
+            fg_color="#238636",
+            hover_color="#2ea043",
+            height=34,
+            command=lambda: self._apply_input_accounts(replace=False)
+        )
+        btn_append.pack(side="right", padx=(6, 0))
+
+        btn_replace = ctk.CTkButton(
+            btn_box,
+            text="🔄 Thay thế danh sách",
+            font=ctk.CTkFont(size=12),
+            fg_color="#1f6feb",
+            hover_color="#388bfd",
+            height=34,
+            command=lambda: self._apply_input_accounts(replace=True)
+        )
+        btn_replace.pack(side="right", padx=4)
+
+        # RIGHT COLUMN: GUIDE ON HOW TO GET LOGIN_CREDENTIAL
+        right_frame = ctk.CTkScrollableFrame(tab, corner_radius=10, fg_color="#161b22")
+        right_frame.grid(row=0, column=1, padx=(8, 5), pady=8, sticky="nsew")
+
+        lbl_guide_title = ctk.CTkLabel(
+            right_frame,
+            text="💡 Hướng dẫn lấy Login-Credential",
+            font=ctk.CTkFont(size=16, weight="bold"),
+            text_color="#f0883e"
+        )
+        lbl_guide_title.pack(anchor="w", padx=10, pady=(10, 8))
+
+        # Quick action: Open web
+        btn_open_web = ctk.CTkButton(
+            right_frame,
+            text="🌐 Mở trang sự kiện LagoFast trên trình duyệt",
+            font=ctk.CTkFont(size=12, weight="bold"),
+            fg_color="#1f6feb",
+            hover_color="#388bfd",
+            height=36,
+            command=self._open_lagofast_web
+        )
+        btn_open_web.pack(fill="x", padx=10, pady=(0, 10))
+
+        # Quick action: Copy 1-line JS script
+        btn_copy_js = ctk.CTkButton(
+            right_frame,
+            text="📋 Copy mã lấy Token nhanh (1-Click)",
+            font=ctk.CTkFont(size=12, weight="bold"),
+            fg_color="#238636",
+            hover_color="#2ea043",
+            height=36,
+            command=self._copy_extract_js
+        )
+        btn_copy_js.pack(fill="x", padx=10, pady=(0, 15))
+
+        # Detailed steps text
+        guide_steps = (
+            "📌 CÁCH LẤY TOKEN CỰC NHANH (3 BƯỚC):\n\n"
+            "1️⃣ Bước 1: Bấm nút 'Mở trang sự kiện' ở trên để mở trình duyệt, sau đó đăng nhập tài khoản Google vào LagoFast.\n\n"
+            "2️⃣ Bước 2: Bấm nút 'Copy mã lấy Token nhanh' ở trên.\n\n"
+            "3️⃣ Bước 3: Trên trình duyệt web LagoFast, nhấn phím F12 (hoặc chuột phải chọn Kiểm tra) -> chuyển sang tab Console -> Nhấn Ctrl+V để dán mã vào và gõ Enter.\n\n"
+            "👉 Token sẽ tự động được sao chép vào bộ nhớ tạm! Bạn chỉ việc quay lại tool và dán vào ô bên trái theo cú pháp:\n"
+            "   email@gmail.com|token\n\n"
+            "-----------------------------------------\n"
+            "📌 CÁCH 2: LẤY TRỰC TIẾP TỪ COOKIE:\n\n"
+            "• Nhấn F12 trên web LagoFast.\n"
+            "• Chọn tab Application (Ứng dụng) ở thanh trên cùng.\n"
+            "• Ở cột bên trái, mở mục Cookies -> chọn https://www.lagofast.com.\n"
+            "• Tìm dòng có tên: Login-Credential.\n"
+            "• Cột Value chính là chuỗi token cần lấy (dạng: 2026..._dd2bb9...).\n\n"
+            "-----------------------------------------\n"
+            "📌 LƯU Ý QUAN TRỌNG:\n"
+            "• Token Login-Credential có thời hạn dài, bạn chỉ cần lấy 1 lần cho mỗi tài khoản Gmail.\n"
+            "• Bạn có thể lưu danh sách thành file .txt rồi bấm 'Chọn File' để nạp hàng loạt!"
+        )
+
+        lbl_guide_content = ctk.CTkLabel(
+            right_frame,
+            text=guide_steps,
+            font=ctk.CTkFont(size=11),
+            text_color="#c9d1d9",
+            justify="left",
+            wraplength=380
+        )
+        lbl_guide_content.pack(anchor="w", padx=10, pady=5)
+
+    def _open_lagofast_web(self):
+        aid = self.entry_aid.get().strip() or DEFAULT_AID
+        url = f"https://www.lagofast.com/vi/act/?aid={aid}&from=sign"
+        webbrowser.open(url)
+        self.log(f"Đã mở trang LagoFast: {url}", "INFO")
+
+    def _copy_extract_js(self):
+        self.clipboard_clear()
+        self.clipboard_append(COOKIE_EXTRACT_JS)
+        messagebox.showinfo(
+            "Đã sao chép!",
+            "Mã trích xuất Token đã được sao chép!\n\n"
+            "Bây giờ hãy sang tab Console trong F12 của trình duyệt, nhấn Ctrl+V rồi gõ Enter."
+        )
+
+    def _load_file_into_input(self):
+        path = filedialog.askopenfilename(
+            title="Chọn file chứa danh sách tài khoản",
+            filetypes=[("Text files", "*.txt"), ("CSV files", "*.csv"), ("All files", "*.*")]
+        )
+        if not path:
+            return
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                content = f.read()
+            self.txt_input_area.delete("1.0", "end")
+            self.txt_input_area.insert("1.0", content)
+            self.log(f"Đã nạp nội dung file vào ô nhập: {os.path.basename(path)}", "INFO")
+        except Exception as e:
+            messagebox.showerror("Lỗi", f"Không thể đọc file: {e}")
+
+    def _apply_input_accounts(self, replace: bool = False):
+        text = self.txt_input_area.get("1.0", "end").strip()
+        if not text:
+            messagebox.showwarning("Thông báo", "Ô nhập liệu đang trống!")
+            return
+
+        if replace:
+            if messagebox.askyesno("Xác nhận", "Thao tác này sẽ xóa danh sách hiện tại và thay thế bằng danh sách mới. Tiếp tục?"):
+                self.acc_mgr.clear()
+            else:
+                return
+
+        added = self.acc_mgr.add_from_text(text)
+        self._populate_table()
+        self._update_stats()
+
+        if added > 0:
+            self.log(f"Đã thêm thành công {added} tài khoản mới vào hệ thống!", "SUCCESS")
+            messagebox.showinfo("Thành công", f"Đã nạp {added} tài khoản mới vào bảng điều khiển!")
+            self.tabview.set("⚡ Điều Khiển & Danh Sách")
+        else:
+            messagebox.showwarning("Thông báo", "Không có tài khoản mới hợp lệ nào được thêm (có thể đã trùng lặp).")
+
+    # ==========================================
+    # DATA & TABLE LOGIC
+    # ==========================================
     def _update_stats(self):
         total = len(self.acc_mgr.accounts)
         shared = sum(1 for a in self.acc_mgr.accounts if a.shared == "Đã chia sẻ")
@@ -530,11 +703,13 @@ class MainWindow(ctk.CTk):
         self.txt_logs.delete("1.0", "end")
         self.txt_logs.configure(state="disabled")
 
-    # --- Task Execution ---
+    # ==========================================
+    # TASK EXECUTION
+    # ==========================================
     def _start_task(self, task_type: str, target_accounts: Optional[List[Account]] = None):
         accounts = target_accounts if target_accounts is not None else self.acc_mgr.accounts
         if not accounts:
-            messagebox.showwarning("Thông báo", "Danh sách tài khoản đang rỗng! Vui lòng thêm tài khoản trước.")
+            messagebox.showwarning("Thông báo", "Danh sách tài khoản đang rỗng! Vui lòng sang tab 'Nhập Tài Khoản / Email' để thêm tài khoản.")
             return
 
         aid = self.entry_aid.get().strip() or DEFAULT_AID
@@ -593,44 +768,12 @@ class MainWindow(ctk.CTk):
         self.btn_share.configure(state=state)
         self.btn_draw.configure(state=state)
         self.btn_check.configure(state=state)
-        self.btn_paste.configure(state=state)
-        self.btn_import.configure(state=state)
         self.btn_export.configure(state=state)
         self.btn_stop.configure(state="normal" if running else "disabled")
 
-    # --- Account Operations ---
-    def _open_paste_dialog(self):
-        def on_submit(text: str) -> bool:
-            added = self.acc_mgr.add_from_text(text)
-            if added > 0:
-                self._populate_table()
-                self._update_stats()
-                self.log(f"Đã thêm thành công {added} tài khoản mới!", "SUCCESS")
-                return True
-            else:
-                messagebox.showwarning("Thông báo", "Không tìm thấy tài khoản mới hợp lệ hoặc đã tồn tại!")
-                return False
-
-        PasteAccountsDialog(self, on_submit)
-
-    def _import_file(self):
-        path = filedialog.askopenfilename(
-            title="Chọn file chứa danh sách tài khoản",
-            filetypes=[("Text files", "*.txt"), ("CSV files", "*.csv"), ("All files", "*.*")]
-        )
-        if not path:
-            return
-        try:
-            with open(path, "r", encoding="utf-8") as f:
-                text = f.read()
-            added = self.acc_mgr.add_from_text(text)
-            self._populate_table()
-            self._update_stats()
-            self.log(f"Đã nhập {added} tài khoản từ file: {os.path.basename(path)}", "SUCCESS")
-            messagebox.showinfo("Thành công", f"Đã thêm {added} tài khoản vào danh sách!")
-        except Exception as e:
-            messagebox.showerror("Lỗi", f"Không thể đọc file: {e}")
-
+    # ==========================================
+    # FILE & ACCOUNT MANAGEMENT
+    # ==========================================
     def _export_csv(self):
         if not self.acc_mgr.accounts:
             messagebox.showwarning("Thông báo", "Danh sách rỗng, không có dữ liệu để xuất!")
@@ -669,7 +812,9 @@ class MainWindow(ctk.CTk):
         self._update_stats()
         self.log(f"Đã xóa {len(selected_iids)} tài khoản được chọn.", "INFO")
 
-    # --- Context Menu Callbacks ---
+    # ==========================================
+    # CONTEXT MENU
+    # ==========================================
     def _show_context_menu(self, event):
         item = self.tree.identify_row(event.y)
         if item:
@@ -707,6 +852,7 @@ class MainWindow(ctk.CTk):
             self.clipboard_clear()
             self.clipboard_append(accs[0].credential)
             self.log(f"Đã sao chép token của {accs[0].email or accs[0].short_credential} vào bộ nhớ tạm.", "INFO")
+
 
 if __name__ == "__main__":
     app = MainWindow()
